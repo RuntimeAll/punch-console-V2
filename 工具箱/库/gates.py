@@ -241,18 +241,31 @@ def _check_gfm_table_blank_lines(md, tag, errors):
 # 闸②　考点叶子闸
 # ══════════════════════════════════════════════════════════════════════
 def assert_leaf_kp(conn, kp_id):
-    """kp_id 必须存在且无子节点，否则抛 LeafKpError（带原话）。通过返回 True。"""
+    """kp_id 必须存在、状态现行、level=考点、且无子节点，否则抛 LeafKpError（带原话）。通过返回 True。
+
+    🔴 2026-08-18 补两条（PRD-002 沙盘实测漏洞）：
+      · 状态闸：退役叶（并叶/软删后）不许再挂新引用——否则 merge 白做；
+      · 层级闸：未铺占位（如空壳单元）无子节点也不是考点，挂上去=老区 62% 挂章级重演。
+    """
     if not isinstance(kp_id, str) or not kp_id.strip():
         raise LeafKpError(
             f'考点叶子闸：kp_id={kp_id!r} 非法——每题必挂考点，挂不上就不入库，绝不裸题入库。')
-    row = conn.execute('SELECT id, name, level FROM kp WHERE id = ?', (kp_id,)).fetchone()
+    row = conn.execute('SELECT id, name, level, status FROM kp WHERE id = ?', (kp_id,)).fetchone()
     if row is None:
         raise LeafKpError(
             f'考点叶子闸：kp_id={kp_id!r} 在 kp 表里不存在——kp_id 必 resolve（名/别名→叶子），'
             f'严禁编造；挂不上就不入库，绝不裸题入库。')
+    name, level, status = row[1], row[2], row[3]
+    if status != '现行':
+        raise LeafKpError(
+            f'考点叶子闸：kp_id={kp_id!r}（{name}）status={status!r} 非现行——'
+            f'退役叶不收新引用（并叶去向看 note），未铺占位先铺枝再挂。')
+    if level != '考点':
+        raise LeafKpError(
+            f'考点叶子闸：kp_id={kp_id!r}（{name}）level={level!r} 不是考点层——'
+            f'无子节点的空壳枝也不许挂（挂章级=学情分母失真）。')
     n = conn.execute('SELECT COUNT(*) FROM kp WHERE parent_id = ?', (kp_id,)).fetchone()[0]
     if n:
-        name, level = row[1], row[2]
         raise LeafKpError(
             f'考点叶子闸：kp_id={kp_id!r}（{name}，level={level}）有 {n} 个子节点，不是叶子。'
             f'老区 dim1_kp_id 的注释写「挂叶子」，实测 62% 挂在章级（322 个被用考点里 108 个有子节点）——'

@@ -1,0 +1,22 @@
+{
+  "cover": {
+    "eyebrow": "初中数学 · 浙教版",
+    "title": "暑假计算册",
+    "subtitle": "七年级上册",
+    "en_line": "MATHEMATICS",
+    "pill": "计算专项 · GRADE 7",
+    "en_sub_html": "SUMMER <b>CALCULATION</b> WORKBOOK",
+    "author": "王老师"
+  },
+  "toc": {
+    "sub_html": "七年级上册 · <b>暑假计算专项</b> · 有理数 / 整式加减 / 实数 / 幂运算",
+    "rows": [
+      {"num": "01", "ch": "第 一 章", "title": "有理数", "desc": "相反数与绝对值 · 有理数的运算 等", "page": "01"},
+      {"num": "02", "ch": "第 二 章", "title": "整式的加减", "desc": "单项式与多项式 · 整式的加减 等", "page": "13"},
+      {"num": "03", "ch": "第 三 章", "title": "实　数", "desc": "平方根与立方根 · 实数及其运算 等", "page": "19"},
+      {"num": "04", "ch": "第 四 章", "title": "幂运算与整式乘除", "desc": "幂的运算 · 整式的乘除 等", "page": "25"}
+    ],
+    "foot_left_html": "<span class=\"brand\">王老师</span>",
+    "foot_right_html": "浙教版 <span class=\"dot\">·</span> 全 26 页"
+  }
+}

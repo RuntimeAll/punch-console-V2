@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  :root{
+    --navy:#0e5f5b; --navy-d:#083f3c; --ink:#124a48;
+    --blue:#1f938a; --blue-2:#54c0b5; --steel:#7ba7a2;
+    --faint:#c3e7e0; --blob:#d6f0ea; --blob-2:#bfe8df;
+    --beige:#e9ddbf; --beige-d:#cdbd93; --accent:#f0a13c;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:900px;height:1273px}
+  body{
+    font-family:"Source Han Sans SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+    background:linear-gradient(180deg,#ffffff 0%,#f1fbf8 62%,#e6f6f1 100%);
+    color:var(--ink); position:relative; overflow:hidden;
+  }
+  svg.bg{position:absolute;inset:0;width:900px;height:1273px}
+  .head{position:absolute;left:96px;top:152px;right:80px}
+  .eyebrow{display:flex;align-items:center;gap:16px;font-size:23px;letter-spacing:.3em;
+    color:var(--blue);font-weight:700;margin-bottom:26px}
+  .eyebrow .dot{width:10px;height:10px;background:var(--accent);transform:rotate(45deg)}
+  .h1{font-size:116px;font-weight:900;color:var(--navy);letter-spacing:.03em;line-height:1;
+    white-space:nowrap;text-shadow:0 3px 0 rgba(14,95,91,.05)}
+  .row2{display:flex;align-items:baseline;gap:30px;margin-top:26px}
+  .h2{font-size:74px;font-weight:900;color:var(--navy);letter-spacing:.08em;line-height:1;white-space:nowrap}
+  .men{display:flex;flex-direction:column;gap:12px;padding-bottom:8px}
+  .men .m1{font-size:28px;letter-spacing:.26em;color:var(--blue);font-weight:800}
+  .pill{align-self:flex-start;background:var(--blob-2);color:#1c6f68;font-size:20px;font-weight:800;
+    letter-spacing:.2em;padding:9px 22px;border-radius:22px;white-space:nowrap}
+  .en-sub{margin-top:28px;font-size:24px;letter-spacing:.34em;color:#3f8f86;font-weight:700}
+  .en-sub b{color:var(--accent)}
+
+  .brand-cn{position:absolute;left:50%;transform:translateX(-50%);bottom:150px;text-align:center;z-index:10}
+  .brand-cn .n{font-size:60px;font-weight:900;color:var(--navy);letter-spacing:.24em;line-height:1;padding-left:.24em}
+  .brand-cn .u{margin:16px auto 0;width:120px;height:4px;border-radius:3px;
+    background:linear-gradient(90deg,rgba(240,161,60,0),var(--accent),rgba(240,161,60,0))}
+
+  svg.art{position:absolute;left:50%;transform:translateX(-50%);bottom:64px;width:880px;height:640px}
+</style>
+</head>
+<body>
+  <!-- faint blueprint motifs -->
+  <svg class="bg" viewBox="0 0 900 1273" fill="none">
+    <line x1="112" y1="60" x2="112" y2="560" stroke="var(--faint)" stroke-width="1.4" stroke-dasharray="2 9"/>
+    <circle cx="112" cy="86" r="6" stroke="var(--faint)" stroke-width="1.4"/>
+    <line x1="40" y1="430" x2="860" y2="430" stroke="var(--faint)" stroke-width="1.4" stroke-dasharray="2 9"/>
+    <path d="M860 430 l-16 -6 v12 z" fill="var(--faint)"/>
+    <g stroke="var(--faint)" stroke-width="1.2" opacity=".8">
+      <path d="M70 640 h150 v150 h-150 z" stroke-dasharray="3 7"/>
+      <path d="M70 790 L220 640" stroke-dasharray="3 7"/>
+    </g>
+    <!-- little orbit motif mid-right -->
+    <g stroke="var(--faint)" stroke-width="1.5" fill="none">
+      <ellipse cx="700" cy="392" rx="86" ry="34" transform="rotate(-24 700 392)"/>
+      <circle cx="700" cy="392" r="7" fill="var(--faint)" stroke="none"/>
+    </g>
+  </svg>
+
+  <div class="head">
+    <div class="eyebrow"><span class="dot"></span>{{EYEBROW}}</div>
+    <div class="h1">{{TITLE}}</div>
+    <div class="row2">
+      <div class="h2">{{SUBTITLE}}</div>
+      <div class="men">
+        <div class="m1">{{EN_LINE}}</div>
+        <div class="pill">{{PILL}}</div>
+      </div>
+    </div>
+    <div class="en-sub">{{EN_SUB_HTML}}</div>
+  </div>
+
+  <div class="brand-cn"><div class="n">{{AUTHOR}}</div><div class="u"></div></div>
+
+  <!-- flat-lay SCIENCE gear inside a soft blob -->
+  <svg class="art" viewBox="0 0 880 640" fill="none">
+    <!-- blob -->
+    <path d="M150 300 C90 190 250 120 400 138 C520 152 560 96 680 150 C820 212 850 300 810 400
+             C775 490 690 540 560 556 C430 572 300 574 220 536 C120 488 100 388 150 300 Z"
+          fill="var(--blob)"/>
+    <path d="M180 320 C128 224 268 160 405 176 C516 189 556 140 664 188 C788 244 812 322 776 410
+             C744 490 668 534 552 548 C436 562 318 564 246 530 C156 486 138 398 180 320 Z"
+          fill="var(--blob-2)" opacity=".40"/>
+
+    <!-- ===== microscope (left, hero) — 光轴统一 x=300 垂直对齐 ===== -->
+    <g stroke-linejoin="round">
+      <!-- base: 底板 + 柱脚（居中300） -->
+      <rect x="242" y="492" width="116" height="16" rx="8" fill="var(--navy)"/>
+      <path d="M278 494 l44 0 l-9 -44 l-26 0 z" fill="var(--navy)"/>
+      <!-- curved arm (right side): 底座 → 托镜筒背 -->
+      <path d="M312 452 q46 -6 46 -58 q0 -44 -38 -66" fill="none" stroke="var(--navy)" stroke-width="16" stroke-linecap="round"/>
+      <!-- stage（居中300）+ 通光孔 -->
+      <rect x="248" y="356" width="104" height="16" rx="4" fill="var(--ink)"/>
+      <circle cx="300" cy="364" r="6.5" fill="#eafaf6"/>
+      <rect x="286" y="372" width="28" height="10" rx="3" fill="var(--navy)"/>
+      <!-- objective (载物台正上方，光轴300) -->
+      <path d="M283 330 l34 0 l-8 20 l-18 0 z" fill="var(--navy-d)"/>
+      <!-- body tube (竖直，光轴300) -->
+      <rect x="285" y="224" width="30" height="108" rx="13" fill="var(--navy)"/>
+      <!-- eyepiece (顶，光轴300) -->
+      <rect x="288" y="202" width="24" height="30" rx="9" fill="var(--ink)"/>
+      <!-- focus knob (臂上，右侧) -->
+      <circle cx="352" cy="392" r="13" fill="var(--accent)"/>
+      <circle cx="348" cy="388" r="4.5" fill="#fff" opacity=".55"/>
+    </g>
+
+    <!-- ===== Erlenmeyer flask (top center) — 左右对称，中轴 x=437 ===== -->
+    <g stroke-linejoin="round">
+      <rect x="424" y="192" width="26" height="20" rx="3" fill="#eafaf6" stroke="var(--navy)" stroke-width="6"/>
+      <path d="M429 212 L429 250 L390 348 Q384 361 397 361 L477 361 Q490 361 484 348 L445 250 L445 212 Z"
+            fill="#eafaf6" stroke="var(--navy)" stroke-width="6"/>
+      <path d="M406 318 L468 318 L481 348 Q487 360 476 360 L398 360 Q387 360 393 348 Z" fill="var(--accent)" opacity=".9"/>
+      <circle cx="426" cy="336" r="4" fill="#fff" opacity=".6"/>
+      <circle cx="450" cy="344" r="3.4" fill="#fff" opacity=".55"/>
+      <g stroke="var(--navy)" stroke-width="2" opacity=".65"><line x1="460" y1="300" x2="474" y2="300"/><line x1="464" y1="282" x2="474" y2="282"/></g>
+    </g>
+
+    <!-- ===== test tubes (center) ===== -->
+    <g transform="rotate(13 542 300)">
+      <rect x="522" y="228" width="22" height="156" rx="11" fill="#eafaf6" stroke="var(--navy)" stroke-width="4"/>
+      <path d="M522 350 h22 v23 a11 11 0 0 1 -22 0 z" fill="var(--blue-2)"/>
+      <rect x="519" y="223" width="28" height="9" rx="3" fill="var(--navy)"/>
+      <circle cx="533" cy="360" r="3" fill="#fff" opacity=".6"/>
+    </g>
+    <g transform="rotate(-5 578 302)">
+      <rect x="566" y="236" width="22" height="150" rx="11" fill="#eafaf6" stroke="var(--navy)" stroke-width="4"/>
+      <path d="M566 356 h22 v19 a11 11 0 0 1 -22 0 z" fill="var(--accent)" opacity=".9"/>
+      <rect x="563" y="231" width="28" height="9" rx="3" fill="var(--navy)"/>
+    </g>
+
+    <!-- ===== beaker (right, anchor) ===== -->
+    <g stroke-linejoin="round">
+      <path d="M628 322 L764 322 L751 462 q-2 11 -13 11 l-97 0 q-11 0 -13 -11 Z"
+            fill="#eafaf6" stroke="var(--navy)" stroke-width="6"/>
+      <path d="M628 322 q-15 -3 -20 -15" fill="none" stroke="var(--navy)" stroke-width="6" stroke-linecap="round"/>
+      <path d="M636 388 L756 388 L751 462 q-2 11 -13 11 l-97 0 q-11 0 -13 -11 Z" fill="var(--blue-2)" opacity=".8"/>
+      <circle cx="672" cy="432" r="5" fill="#fff" opacity=".6"/>
+      <circle cx="702" cy="420" r="4" fill="#fff" opacity=".55"/>
+      <circle cx="718" cy="444" r="3" fill="#fff" opacity=".5"/>
+      <g stroke="var(--navy)" stroke-width="2" opacity=".65"><line x1="738" y1="352" x2="752" y2="352"/><line x1="742" y1="378" x2="752" y2="378"/><line x1="738" y1="404" x2="752" y2="404"/></g>
+    </g>
+
+    <!-- ===== water molecule H2O (bottom center-right small) ===== -->
+    <g>
+      <line x1="628" y1="530" x2="592" y2="506" stroke="var(--steel)" stroke-width="7"/>
+      <line x1="628" y1="530" x2="666" y2="508" stroke="var(--steel)" stroke-width="7"/>
+      <circle cx="628" cy="530" r="20" fill="var(--navy)"/>
+      <circle cx="590" cy="504" r="13" fill="var(--blue-2)"/>
+      <circle cx="668" cy="506" r="13" fill="var(--blue-2)"/>
+      <circle cx="622" cy="524" r="6" fill="#fff" opacity=".4"/>
+    </g>
+  </svg>
+</body>
+</html>

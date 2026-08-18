@@ -32,6 +32,13 @@ python -m punchkit          # 骨架 × 渲染器菜单（daily_v1 默认 / dens
 封面+目录+封底走独立 HTML 模板渲染；目录页行数有限（老区实锤：10 天册目录最多容 5 行，
 必须两天一组分 5 组，硬列 10 行会截出画布）。AB 双号封面/目录**必须两套版式**（隔离清单第 2 维）。
 
+模板与用法正本 = [`_模板/封面目录/README.md`](_模板/封面目录/README.md)（双主题 math/science，坑清单在里面）。
+```powershell
+python .claude\skills\渲染出件\_模板\封面目录\make_cover_toc.py --config <前页.config.json> `
+  --outdir 产物\打卡\<册名>\_源\_前页 --body 产物\打卡\<册名>\题目卷.pdf `
+  --final 产物\打卡\<册名>\成品.pdf --stamp-pages
+```
+
 ## 4. Chrome 出 PDF 配方（三坑照抄，别复验）
 
 ```powershell

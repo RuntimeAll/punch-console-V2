@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  :root{
+    --navy:#153a5e; --navy-d:#0e2c4a; --ink:#12324e; --blue:#3f77b0; --blue-2:#6aa0d0;
+    --faint:#c9d9e8; --line:#d3e0ec; --blob:#dbebf6; --blob-2:#cadff0;
+    --beige:#e9ddbf; --beige-d:#cdbd93; --accent:#e7b23f; --mute:#6f8399;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:900px;height:1273px}
+  body{
+    font-family:"Source Han Sans SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+    background:linear-gradient(180deg,#ffffff 0%,#f4f9fd 70%,#eef5fb 100%);
+    color:var(--ink); position:relative; overflow:hidden;
+  }
+  svg.bg{position:absolute;inset:0;width:900px;height:1273px}
+  svg.corner{position:absolute;right:-96px;bottom:-104px;width:380px;height:330px;opacity:.9}
+
+  .wrap{position:absolute;inset:0;padding:118px 96px 84px;display:flex;flex-direction:column}
+  .eyebrow{display:flex;align-items:center;gap:16px;font-size:22px;letter-spacing:.3em;color:var(--blue);font-weight:700;margin-bottom:26px}
+  .eyebrow .dot{width:10px;height:10px;background:var(--accent);transform:rotate(45deg)}
+  .head{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:3px solid var(--navy);padding-bottom:22px}
+  .head .cn{font-size:82px;font-weight:900;letter-spacing:.26em;color:var(--navy);line-height:1}
+  .head .en{font-size:23px;letter-spacing:.46em;color:var(--blue);font-weight:800;margin-bottom:12px}
+  .sub{margin-top:20px;font-size:22px;color:var(--mute);letter-spacing:.1em}
+  .sub b{color:var(--blue);font-weight:800}
+
+  .list{margin-top:30px;flex:1;display:flex;flex-direction:column}
+  .row{position:relative;display:grid;grid-template-columns:120px 1fr auto;align-items:center;
+    padding:28px 6px 28px 0;border-bottom:1px solid var(--line)}
+  .num{font-family:Georgia,"Times New Roman",serif;font-size:80px;font-weight:700;color:var(--blue);
+    opacity:.20;line-height:1}
+  .mid{padding-right:26px}
+  .ch{font-size:20px;letter-spacing:.32em;color:var(--accent);font-weight:800;margin-bottom:8px}
+  .ttl{font-size:38px;font-weight:900;color:var(--navy);letter-spacing:.04em;line-height:1.05}
+  .desc{margin-top:9px;font-size:19px;color:var(--mute);letter-spacing:.05em}
+  .pg{display:flex;flex-direction:column;align-items:center;min-width:100px}
+  .pg .n{font-family:Georgia,serif;font-size:54px;font-weight:700;color:var(--navy);line-height:1}
+  .pg .lab{font-size:15px;letter-spacing:.34em;color:var(--mute);margin-top:6px;padding-left:.34em}
+
+  /* 行数>4 时脚本给 .list 加 compact：收紧行距字号，6 章一页放得下 */
+  .list.compact .row{padding:15px 6px 15px 0}
+  .list.compact .num{font-size:60px}
+  .list.compact .ch{font-size:17px;margin-bottom:5px}
+  .list.compact .ttl{font-size:31px}
+  .list.compact .desc{margin-top:6px;font-size:17px}
+  .list.compact .pg .n{font-size:44px}
+  .list.compact .pg .lab{font-size:13px;margin-top:4px}
+
+  .foot{margin-top:16px;display:flex;justify-content:space-between;align-items:center;
+    border-top:2px solid var(--navy);padding-top:22px;font-size:18px;color:var(--mute);letter-spacing:.14em}
+  .foot .brand{color:var(--navy);font-weight:800}
+  .foot .dot{color:var(--accent)}
+</style>
+</head>
+<body>
+  <svg class="bg" viewBox="0 0 900 1273" fill="none">
+    <line x1="60" y1="70" x2="60" y2="470" stroke="var(--faint)" stroke-width="1.4" stroke-dasharray="2 9"/>
+    <circle cx="60" cy="92" r="5" stroke="var(--faint)" stroke-width="1.4"/>
+    <line x1="40" y1="1080" x2="820" y2="1080" stroke="var(--faint)" stroke-width="1.4" stroke-dasharray="2 9"/>
+    <path d="M820 1080 l-15 -6 v12 z" fill="var(--faint)"/>
+  </svg>
+
+  <!-- corner blob w/ protractor+ruler for series consistency -->
+  <svg class="corner" viewBox="0 0 420 360" fill="none">
+    <path d="M120 160 C90 100 180 70 260 84 C340 98 400 130 380 210 C362 282 300 320 220 316 C140 312 90 250 120 160 Z" fill="var(--blob)"/>
+    <g transform="rotate(-14 250 210)">
+      <path d="M176 226 a80 80 0 0 1 160 0 z" fill="#e7f1f9" stroke="var(--blue-2)" stroke-width="2.4"/>
+      <path d="M196 226 a60 60 0 0 1 120 0" fill="none" stroke="var(--blue-2)" stroke-width="1.6"/>
+      <circle cx="256" cy="226" r="4" fill="var(--blue)"/>
+      <g stroke="var(--blue)" stroke-width="1.5"><line x1="256" y1="150" x2="256" y2="166"/><line x1="210" y1="176" x2="221" y2="185"/><line x1="302" y1="176" x2="291" y2="185"/></g>
+    </g>
+    <g transform="rotate(34 250 250)"><rect x="150" y="256" width="220" height="30" rx="6" fill="var(--beige)" stroke="var(--beige-d)" stroke-width="2"/>
+      <g stroke="#9a8a5e" stroke-width="1.6"><line x1="168" y1="256" x2="168" y2="272"/><line x1="188" y1="256" x2="188" y2="266"/><line x1="208" y1="256" x2="208" y2="272"/><line x1="228" y1="256" x2="228" y2="266"/><line x1="248" y1="256" x2="248" y2="272"/><line x1="268" y1="256" x2="268" y2="266"/><line x1="288" y1="256" x2="288" y2="272"/></g>
+    </g>
+  </svg>
+
+  <div class="wrap">
+    <div class="eyebrow"><span class="dot"></span>{{EYEBROW}}</div>
+    <div class="head">
+      <div class="cn">目　录</div>
+      <div class="en">CONTENTS</div>
+    </div>
+    <div class="sub">{{SUB_HTML}}</div>
+
+    <div class="list {{LIST_CLASS}}">{{ROWS}}</div>
+
+    <div class="foot"><div>{{FOOT_LEFT_HTML}}</div><div>{{FOOT_RIGHT_HTML}}</div></div>
+  </div>
+</body>
+</html>

@@ -82,6 +82,9 @@
     finalize 定稿+promote+覆盖考点回填/list/show；幂等重排）+ 每日打卡·举一反三两线 skill 改库中心口径；
     artifact_tool 补 files 子命令（壳先建、PDF 后挂）；端到端沙盘自证全绿（含 3 反向用例，
     脚本=试验场/2026-08-18-库中心组卷沙盘/端到端自证.py 可一键复跑）
-  - [ ] 10c 渲染从库读 render_paper（render-pack/v1 → punchkit 双 PDF）
-  - [ ] 10d console 薄读 API（node:sqlite :4310 只读）+ 真库两页（/kb/questions、/kb/artifacts）
+  - [x] 10c 渲染从库读 render_paper（工具箱/渲染/：render-pack/v1 → punchkit 双 PDF；blocks→槽位适配、
+    ＝链两形态兼容、figure/option/table 显式拒渲；自证 34/34+PNG 目检；punchkit core 修第四坑进本体）
+  - [x] 10d console 薄读 API（server/kb-read-api.mjs，node:sqlite 只读 :4310，7 端点）+ 真库两页
+    （/kb/questions 左树右表+抽屉公式渲染、/kb/artifacts 册→天→卷下钻）；build 绿+截图目检+注入自测；
+    修 antd Table 打回公式原文真 bug；mock 页一律未动
   - [ ] 10e 实弹按新管线重跑：60 题净题面入库→组 5 paper→从库渲样张（样张停点仍在）→全链到页面可见

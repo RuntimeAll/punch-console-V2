@@ -23,3 +23,7 @@
 | 15 | 版面OCR | 图片源分流（判据已定） | 版面OCR抽取+文件类型探测+试卷OCR重排 | ⑥ | 📋 |
 
 **不迁**：备课链（teacher-mcp 系）、科学线、小红书资料线、部署链（后议）。
+
+**不是 skill 但会落 skill_log 的工具**（库中心产线的公共中段，由 9/10 两线共用，不单独挂号）：
+`工具箱/组卷/paper_tool.py`（skill_log.skill='组卷'）——paper/paper_item 唯一写入通路，
+assemble 从库取题组册 / render-pack 导 render-pack/v1 / finalize 定稿+promote / list / show。

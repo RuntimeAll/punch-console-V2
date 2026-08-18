@@ -70,14 +70,22 @@ def to_pdf(html_path, pdf_path, budget_ms=20000):
          —— 不等就会读到**上一次**的旧文件，"大小一模一样"，排查半天
       3. `--no-pdf-header-footer` 必须排在 `--print-to-pdf` **之前**，否则不生效
     另加：--virtual-time-budget 等 MathJax 排完；--run-all-compositor-stages 保证画完。
+    🔴 第四坑（2026-08-18 render_paper 沙盘上报后修进本体）：撞正开着的 Chrome 会**静默不写文件**
+      ——必须带独立 --user-data-dir 临时 profile；出完验文件真实存在，不存在就抛错不装成功。
     """
-    subprocess.run([CHROME, '--headless=new', '--disable-gpu', '--no-sandbox',
-                    '--no-pdf-header-footer',
-                    '--virtual-time-budget=%d' % budget_ms,
-                    '--run-all-compositor-stages-before-draw',
-                    '--print-to-pdf=' + pdf_path,
-                    'file:///' + html_path.replace('\\', '/')],
-                   check=True, capture_output=True, timeout=300)
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='punchkit-chrome-') as prof:
+        subprocess.run([CHROME, '--headless=new', '--disable-gpu', '--no-sandbox',
+                        '--no-proxy-server',
+                        '--user-data-dir=' + prof,
+                        '--no-pdf-header-footer',
+                        '--virtual-time-budget=%d' % budget_ms,
+                        '--run-all-compositor-stages-before-draw',
+                        '--print-to-pdf=' + pdf_path,
+                        'file:///' + html_path.replace('\\', '/')],
+                       check=True, capture_output=True, timeout=300)
+    if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+        raise RuntimeError('🔴 Chrome 声称跑完但 PDF 不存在/为空：%s' % pdf_path)
 
 
 # ═══════════════ ④ 页数 ═══════════════

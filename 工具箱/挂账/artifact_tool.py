@@ -9,6 +9,8 @@
       --file 产物/打卡/浙教七上有理数5天/题目卷.pdf --file 产物/打卡/.../答案卷.pdf \
       --kp 有理数混合运算 --kp 与绝对值有关的计算 --source-line 每日打卡 \
       [--template daily_v1] [--note '{"小红书标题":"…","宣发描述":"…"}']
+  python artifact_tool.py files --id A2026… --file 产物/打卡/…/题目卷.pdf --file 产物/打卡/…/答案卷.pdf
+      # 🔴 库中心口径：组卷 paper_tool assemble 先建 artifact 壳，PDF 后渲——出货时用本命令补挂真文件
   python artifact_tool.py status --id A2026… --to 已交付
   python artifact_tool.py link --id A2026… --url "https://pan.baidu.com/s/xxx?pwd=ab12"
   python artifact_tool.py note --id A2026… --json 宣发字段.json    # 宣发字段整包回填 note
@@ -121,6 +123,20 @@ def _need(conn, aid):
     return row
 
 
+def cmd_files(conn, args):
+    """成品件回填（🔴 库中心口径的必需件：组卷 paper_tool assemble 先建 artifact 壳，
+    PDF 是后来才渲出来的——壳要能在出货时补挂真文件）。整包替换，不做增量。"""
+    row = _need(conn, args.id)
+    files = [check_rel_file(f) for f in (args.file or [])]
+    if not files:
+        sys.exit('🔴 至少挂一个成品件（--file 相对路径）')
+    conn.execute('UPDATE artifact SET files_json=? WHERE id=?',
+                 (json.dumps(files, ensure_ascii=False), args.id))
+    conn.commit()
+    print(f'{args.id} {row[1]} 成品件回填 {len(files)} 件：' + ' '.join(files))
+    return args.id, f'files={len(files)}'
+
+
 def cmd_status(conn, args):
     _need(conn, args.id)
     if args.to not in ('在产', '已交付', '已上架'):
@@ -202,6 +218,7 @@ def main():
     s.add_argument('--file', action='append'); s.add_argument('--kp', action='append')
     s.add_argument('--source-line', dest='source_line'); s.add_argument('--template')
     s.add_argument('--link'); s.add_argument('--note'); s.add_argument('--id')
+    s = sub.add_parser('files'); s.add_argument('--id', required=True); s.add_argument('--file', action='append')
     s = sub.add_parser('status'); s.add_argument('--id', required=True); s.add_argument('--to', required=True)
     s = sub.add_parser('link'); s.add_argument('--id', required=True); s.add_argument('--url', required=True)
     s = sub.add_parser('note'); s.add_argument('--id', required=True); s.add_argument('--json', required=True)
@@ -216,8 +233,9 @@ def main():
     t0 = time.time()
     conn = open_db(args.db)
     try:
-        fn = {'add': cmd_add, 'status': cmd_status, 'link': cmd_link, 'note': cmd_note,
-              'list': cmd_list, 'template-add': cmd_template_add, 'template-list': cmd_template_list}[args.cmd]
+        fn = {'add': cmd_add, 'files': cmd_files, 'status': cmd_status, 'link': cmd_link,
+              'note': cmd_note, 'list': cmd_list,
+              'template-add': cmd_template_add, 'template-list': cmd_template_list}[args.cmd]
         digest, detail = fn(conn, args)
         log_skill(conn, args.cmd, digest, '成功', detail, t0)
     except (SystemExit, LeafKpError) as e:

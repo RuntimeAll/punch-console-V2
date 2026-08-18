@@ -5,6 +5,16 @@ description: 把题库数据渲成印刷级成品（HTML→Chrome→PDF），题
 
 # 渲染出件 —— HTML → Chrome → PDF（横切正本=认知/业务流程.md §五）
 
+## 0b. 🔴 库中心主路（2026-08-18 拍板）：渲染从库读
+
+组过卷的东西（打卡册/专项卷）一律走 render-pack 通路，不再手拼数据：
+```powershell
+python 工具箱/组卷/paper_tool.py render-pack --artifact <A…> --out <pack.json>
+python 工具箱/渲染/render_paper.py <pack.json> --out-dir 产物/打卡/<册名> [--sample-ord N] [--png]
+```
+渲染器直接吃 question.blocks_json（存取同构：改题=改库，重渲即得，双载荷漂移不可能发生）。
+figure/option/table 块与 equation/word_multi 槽位当前**显式拒渲**（不静默丢），待批次⑥。
+
 ## 0. 开工前
 
 `python 工具箱/库/inject_criteria.py 渲染` 注入现行判据。

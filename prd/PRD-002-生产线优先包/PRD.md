@@ -78,7 +78,10 @@
   也都得存系统里面来，后面我拿题目还有打卡都是可以从页面上打开看到结果的，而且是直接入库了的"*）：
   - [x] 10a 正本+DDL：数据结构 §2.6b 载体域 paper/paper_item；业务流程 §二/§三改库中心口径；
     DDL 追加并主位显式执行（badcdfb）
-  - [ ] 10b 组卷工具 paper_tool（assemble 从库取题·库存未用优先/render-pack/finalize）+ 两线 skill 重写
+  - [x] 10b 组卷工具 paper_tool（工具箱/组卷/：assemble 库存未用优先取题+组卷闸四条/render-pack/v1 导出/
+    finalize 定稿+promote+覆盖考点回填/list/show；幂等重排）+ 每日打卡·举一反三两线 skill 改库中心口径；
+    artifact_tool 补 files 子命令（壳先建、PDF 后挂）；端到端沙盘自证全绿（含 3 反向用例，
+    脚本=试验场/2026-08-18-库中心组卷沙盘/端到端自证.py 可一键复跑）
   - [ ] 10c 渲染从库读 render_paper（render-pack/v1 → punchkit 双 PDF）
   - [ ] 10d console 薄读 API（node:sqlite :4310 只读）+ 真库两页（/kb/questions、/kb/artifacts）
   - [ ] 10e 实弹按新管线重跑：60 题净题面入库→组 5 paper→从库渲样张（样张停点仍在）→全链到页面可见

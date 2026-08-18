@@ -16,6 +16,9 @@ import Kg from '@/pages/kg'
 import Model from '@/pages/model'
 import Cause from '@/pages/cause'
 import Criteria from '@/pages/criteria'
+// 🔴 真库组：直连 kb.db 的只读页（与上面所有 mock 页并列不合并，改一边不影响另一边）
+import KbQuestions from '@/pages/kb-questions'
+import KbArtifacts from '@/pages/kb-artifacts'
 import NotFound from '@/pages/not-found'
 
 /**
@@ -53,6 +56,10 @@ export function App() {
           <Route path="/model" element={<Model />} />
           <Route path="/cause" element={<Cause />} />
           <Route path="/criteria" element={<Criteria />} />
+
+          {/* 🔴 真库：走 /api/kb 薄读 API（node console/server/kb-read-api.mjs，:4310），只读无写口 */}
+          <Route path="/kb/questions" element={<KbQuestions />} />
+          <Route path="/kb/artifacts" element={<KbArtifacts />} />
 
           <Route path="/export-preview" element={<ExportPreview />} />
           <Route path="*" element={<NotFound />} />

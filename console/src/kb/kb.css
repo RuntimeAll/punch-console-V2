@@ -1,0 +1,143 @@
+/* 真库页专用样式（只被 /kb/* 两页引用，不影响任何 mock 页） */
+
+/* ── 块流 ─────────────────────────────────────────────── */
+.kbdoc {
+  font-size: 14px;
+  line-height: 1.9;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.kbdoc .kb-row {
+  margin: 0 0 6px;
+}
+
+/* 一行多 cell = 流式排布：短的并排、放不下的整块折行 */
+.kbdoc .kb-row-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  align-items: flex-start;
+}
+
+.kbdoc .kb-text {
+  margin: 0;
+}
+
+/* 🔴 option 整体不可折散：标号与内容一个盒子 */
+.kbdoc .kb-option {
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
+}
+
+.kbdoc .kb-option-label {
+  color: rgba(0, 0, 0, 0.65);
+  font-weight: 600;
+}
+
+/* figure 只出占位框（真身在 知识库/资产/，展示台不做图床） */
+.kbdoc .kb-figure {
+  display: inline-block;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  background: #fafafa;
+  padding: 10px 12px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+  min-width: 140px;
+  box-sizing: border-box;
+}
+
+.kbdoc .kb-figure b {
+  color: rgba(0, 0, 0, 0.65);
+  font-weight: 600;
+}
+
+.kbdoc .kb-table {
+  overflow-x: auto;
+}
+
+.kbdoc .kb-table table {
+  border-collapse: collapse;
+  margin: 4px 0;
+}
+
+.kbdoc .kb-table th,
+.kbdoc .kb-table td {
+  border: 1px solid #e0e0e0;
+  padding: 4px 10px;
+  text-align: center;
+  font-weight: normal;
+}
+
+.kbdoc .kb-table th {
+  background: #fafafa;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.kbdoc .kb-role {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #f0f5ff;
+  color: #2f54eb;
+  font-size: 11px;
+  line-height: 18px;
+  vertical-align: 1px;
+}
+
+/* ── 真库页版面 ───────────────────────────────────────── */
+.kb-tree-panel {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+
+.kb-sec-title {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+/* 一天一屏：单卷视图 */
+.kb-sheet {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 18px 22px;
+}
+
+.kb-sheet-item {
+  padding: 12px 0;
+  border-bottom: 1px dashed #f0f0f0;
+}
+
+.kb-sheet-item:last-child {
+  border-bottom: none;
+}
+
+.kb-sheet-no {
+  display: inline-block;
+  min-width: 26px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.kb-answer-box {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #f6ffed;
+  border-left: 3px solid #b7eb8f;
+  border-radius: 0 4px 4px 0;
+}
+
+.kb-analysis-box {
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-left: 3px solid #d9d9d9;
+  border-radius: 0 4px 4px 0;
+}

@@ -5,6 +5,7 @@ import type { MenuProps } from 'antd'
 import {
   ApartmentOutlined,
   CheckSquareOutlined,
+  CloudServerOutlined,
   DatabaseOutlined,
   DesktopOutlined,
   FolderOpenOutlined,
@@ -79,6 +80,18 @@ const NAV: NavItem[] = [
       { key: '/criteria', label: '判据沉淀' },
     ],
   },
+  {
+    // 🔴 真库组（PRD-002c）：上面所有页吃 mock，这一组直连 kb.db（/api/kb 只读 API）。
+    //    两套并列不合并——mock 页是设计稿、真库页是数据，混一起改一个必崩另一个。
+    kind: 'group',
+    key: 'g-kb',
+    icon: <CloudServerOutlined />,
+    label: '真库',
+    children: [
+      { key: '/kb/questions', label: '题库·真库' },
+      { key: '/kb/artifacts', label: '资料册·真库' },
+    ],
+  },
   { kind: 'leaf', key: '/export-preview', icon: <PrinterOutlined />, label: '模版库' },
 ]
 
@@ -92,6 +105,9 @@ const OPEN_KEYS = NAV.filter((n) => n.kind === 'group').map((n) => n.key)
  */
 function activeKey(pathname: string): string {
   if (pathname === '/') return '/'
+  // 🔴 真库两页排最前：/kb/* 与 /questions、/artifacts（mock 页）是**两套页**，绝不能互相点亮
+  if (pathname.startsWith('/kb/questions')) return '/kb/questions'
+  if (pathname.startsWith('/kb/artifacts')) return '/kb/artifacts'
   // 🔴 /todo 必须排在 /grading/todo 的重定向之外单独认：两者不是一个东西
   if (pathname.startsWith('/todo')) return '/todo'
   if (pathname.startsWith('/grading/queue')) return '/grading/queue'
@@ -142,9 +158,17 @@ export function Shell() {
           <span style={{ fontSize: 16, fontWeight: 600, color: 'rgba(0,0,0,0.88)' }}>知识工厂 V2.1</span>
           <span style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>V2.1 原型</span>
         </div>
-        <Tag color="orange" style={{ marginInlineEnd: 0 }}>
-          mock 数据 · 设计稿评审版
-        </Tag>
+        {/* 🔴 顶栏这枚标签是「你现在看的是真是假」的唯一告示，必须随页面如实变：
+            /kb/* 是真库页（直连 kb.db 只读），其余页仍是 mock 设计稿。挂着 mock 标签渲真数据 = 说谎。 */}
+        {pathname.startsWith('/kb/') ? (
+          <Tag color="green" style={{ marginInlineEnd: 0 }}>
+            真库数据 · 只读（kb.db）
+          </Tag>
+        ) : (
+          <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+            mock 数据 · 设计稿评审版
+          </Tag>
+        )}
       </Header>
 
       <Layout>

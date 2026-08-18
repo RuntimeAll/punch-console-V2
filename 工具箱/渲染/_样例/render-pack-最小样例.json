@@ -1,0 +1,71 @@
+{
+  "contract": "render-pack/v1",
+  "_说明": "render_paper.py 的最小自证样例：2 卷 × 2 节 × 2 题，算式全可手算，解析构造成＝链。组卷侧 paper_tool.py render-pack 按本形状产出即可对接。",
+  "artifact": {"id": "A-SAMPLE-001", "name": "有理数计算·两天打卡样例", "kind": "打卡册"},
+  "papers": [
+    {
+      "id": "p-001", "kind": "打卡天", "title": "第一天·有理数的加减", "ord": 1,
+      "layout": {
+        "layout": "dense_sections", "body_pt": 12.5, "watermark": null,
+        "sections": [
+          {"name": "整数加减混合链", "slot": "expr", "grid": "block", "gap": 0, "gap_each": 13, "ans_cols": 1},
+          {"name": "分数与小数", "slot": "expr", "grid": "block", "gap": 0, "gap_each": 15, "ans_cols": 1}
+        ]
+      },
+      "items": [
+        {"ord": 1, "section": "整数加减混合链", "score": null,
+         "question": {"id": "q001", "qtype": "计算题", "difficulty": "巩固",
+           "blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "题面", "md": "$(-8)+13-(-5)$"}]}]},
+           "answer_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "答案", "md": "$10$"}]}]},
+           "analysis_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "解析", "md": "＝$5-(-5)$\n＝$10$"}]}]}}},
+        {"ord": 2, "section": "整数加减混合链", "score": null,
+         "question": {"id": "q002", "qtype": "计算题", "difficulty": "巩固",
+           "blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "题面", "md": "$(-3)+(-7)-(-2)$"}]}]},
+           "answer_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "答案", "md": "$-8$"}]}]},
+           "analysis_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "解析", "md": "＝$(-10)-(-2)$\n＝$-10+2$\n＝$-8$"}]}]}}},
+        {"ord": 3, "section": "分数与小数", "score": null,
+         "question": {"id": "q003", "qtype": "计算题", "difficulty": "巩固",
+           "blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "题面", "md": "$\\frac{1}{2}+\\frac{1}{3}$"}]}]},
+           "answer_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "答案", "md": "$\\frac{5}{6}$"}]}]},
+           "analysis_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "解析", "md": "＝$\\frac{3}{6}+\\frac{2}{6}$\n＝$\\frac{5}{6}$"}]}]}}},
+        {"ord": 4, "section": "分数与小数", "score": null,
+         "question": {"id": "q004", "qtype": "计算题", "difficulty": "基础",
+           "blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "题面", "md": "计算：$2.5-(-1.5)$"}]}]},
+           "answer_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "答案", "md": "$4$"}]}]},
+           "analysis_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "解析", "md": "＝$2.5+1.5$\n＝$4$"}]}]}}}
+      ]
+    },
+    {
+      "id": "p-002", "kind": "打卡天", "title": "第二天·有理数的乘除", "ord": 2,
+      "layout": {
+        "layout": "dense_sections", "body_pt": 12.5, "watermark": null,
+        "sections": [
+          {"name": "乘除混合", "slot": "expr", "grid": "block", "gap": 0, "gap_each": 13, "ans_cols": 1},
+          {"name": "文字应用", "slot": "word", "grid": "block", "gap": 0, "gap_each": 22, "ans_cols": 1}
+        ]
+      },
+      "items": [
+        {"ord": 1, "section": "乘除混合", "score": null,
+         "question": {"id": "q005", "qtype": "计算题", "difficulty": "巩固",
+           "blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "题面", "md": "$(-24)\\div 6\\times(-2)$"}]}]},
+           "answer_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "答案", "md": "$8$"}]}]},
+           "analysis_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "解析", "md": "＝$(-4)\\times(-2)$\n＝$8$"}]}]}}},
+        {"ord": 2, "section": "乘除混合", "score": null,
+         "question": {"id": "q006", "qtype": "计算题", "difficulty": "提高",
+           "blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "题面", "md": "$\\left(-\\frac{3}{4}\\right)\\times\\left(-\\frac{8}{9}\\right)$"}]}]},
+           "answer_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "答案", "md": "$\\frac{2}{3}$"}]}]},
+           "analysis_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "解析", "md": "＝$\\frac{3\\times 8}{4\\times 9}$\n＝$\\frac{2}{3}$"}]}]}}},
+        {"ord": 3, "section": "文字应用", "score": null,
+         "question": {"id": "q007", "qtype": "应用题", "difficulty": "巩固",
+           "blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "题面", "md": "小明有 $12$ 元，买笔用去其中的 $\\frac{1}{3}$，他还剩多少元？"}]}]},
+           "answer_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "答案", "md": "答：他还剩 $8$ 元。"}]}]},
+           "analysis_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "解析", "md": "$12-12\\times\\frac{1}{3}$\n＝$12-4$\n＝$8$"}]}]}}},
+        {"ord": 4, "section": "文字应用", "score": null,
+         "question": {"id": "q008", "qtype": "应用题", "difficulty": "基础",
+           "blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "题面", "md": "一支笔 $3.5$ 元，买 $4$ 支一共需要多少元？"}]}]},
+           "answer_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "答案", "md": "答：一共需要 $14$ 元。"}]}]},
+           "analysis_blocks": {"v": 2, "rows": [{"cells": [{"type": "text", "role": "解析", "md": "$3.5\\times 4$\n＝$14$"}]}]}}}
+      ]
+    }
+  ]
+}

@@ -371,3 +371,32 @@ CREATE TABLE IF NOT EXISTS skill_log (
   created_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_skill_log_skill ON skill_log(skill, created_at);
+
+-- ---------------------------------------------------------------------
+-- paper / paper_item —— 载体域（2026-08-18 库中心产线拍板；数据结构 §2.6b）
+-- 🔴 题号/分值=载体属性不属题（§2.1① 两个刻意"没有"的字段在此落点）。
+-- 组卷闸（工具层）：question 非退役+挂叶子；同一 artifact 内一题不重复；
+-- 取库存限 status IN ('草稿','上架')。使用足迹=join 本表现算，不建计数列。
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS paper (
+  id          TEXT PRIMARY KEY,
+  artifact_id TEXT REFERENCES artifact(id),
+  kind        TEXT NOT NULL CHECK(kind IN ('打卡天','专项卷','试卷','其他')),
+  title       TEXT NOT NULL,
+  ord         INTEGER,                     -- 册内序（打卡=天号）
+  layout_json TEXT,                        -- 版式参数（layout key+节/槽位/留白），渲染从库读的依据
+  status      TEXT NOT NULL CHECK(status IN ('草稿','定稿')),
+  created_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_paper_artifact ON paper(artifact_id, ord);
+
+CREATE TABLE IF NOT EXISTS paper_item (
+  paper_id    TEXT NOT NULL REFERENCES paper(id),
+  ord         INTEGER NOT NULL,            -- 卷内题序（题号的唯一落点）
+  question_id TEXT NOT NULL REFERENCES question(id),
+  section     TEXT,
+  score       REAL,
+  note        TEXT,
+  PRIMARY KEY (paper_id, ord)
+);
+CREATE INDEX IF NOT EXISTS ix_paper_item_question ON paper_item(question_id);

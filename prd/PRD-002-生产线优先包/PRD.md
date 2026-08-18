@@ -62,10 +62,10 @@
 
 - [x] 1 KG 建树工具+首枝（工具箱/kg/：kg_tool.py 建枝/挂叶/别名/resolve/merge + 首枝spec浙教七上·33叶沙盘全绿；叶子闸补退役/层级两闸；主位铺枝待合并后执行）
 - [x] 2 回流入库轻通路（工具箱/回流/：ingest_flow.py 三闸+相似前查+血缘校验+promote；model_tool.py 模型留档+考点覆盖对账；沙盘 2 好题入库、6 类坏题全拒）
-- [ ] 3 skill 每日打卡
-- [ ] 4 skill 举一反三
-- [ ] 5 skill 渲染出件
-- [ ] 6 skill 网盘分发
-- [ ] 7 skill 发布物料
-- [ ] 8 skill 资料挂账
+- [x] 3 skill 每日打卡（四步+飞轮铁律写死；DSL 底座=工具箱/dsl/有理数混合运算_qbank.py 已平移自证 ALL PASS）
+- [x] 4 skill 举一反三（四步+血缘；快线三闸+答案不撞+表述闸；模型走 model_tool、题走 ingest_flow）
+- [x] 5 skill 渲染出件（punchkit 平移 v2 路径全通；Chrome 三坑；template-add 登记原语）
+- [x] 6 skill 网盘分发（panctl/panbrowser 平移改 v2 password；--force+fs_id 铁律；总表落 记录/网盘分发/）
+- [x] 7 skill 发布物料（三件套+AB隔离闸/文案查重平移；口径正本落 记录/发布物料正本.md；宣发字段进 artifact.note）
+- [x] 8 skill 资料挂账（工具箱/挂账/artifact_tool.py：add/link/note/status+template 登记，文件真存在闸+叶子闸）
 - [ ] 9 🔴 实弹验收一本小册（全链+回查库）

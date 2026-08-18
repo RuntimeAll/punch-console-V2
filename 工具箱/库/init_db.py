@@ -146,8 +146,9 @@ def main():
     args = ap.parse_args()
 
     keys = [args.only] if args.only else list(DBS)
-    ok = all(handle(k, args.force, args.check) for k in keys)
-    print('\n' + ('全部完成' if ok else '🔴 有库被空库保护拦下，未做任何修改'))
+    # 🔴 先全跑再判：用 all(生成器) 会短路，一个库被保护拦下就漏掉另一个库的体检
+    ok = all([handle(k, args.force, args.check) for k in keys])
+    print('\n' + ('全部完成' if ok else '🔴 有库被空库保护拦下：该库未重建、数据原样（要重建加 --force）'))
     return 0 if ok else 2
 
 

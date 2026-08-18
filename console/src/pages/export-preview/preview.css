@@ -1,0 +1,190 @@
+/* 模版库页自用样式（页面组 I）。类名统一 ep-* 前缀，不改公共件。 */
+
+/* ── 货架：模版卡栅格 ─────────────────────────────────────
+   窄屏自动落成一列，不写媒体查询（auto-fill + minmax 就够）。 */
+.ep-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+/* 卡片等高：用途长短不一，靠 flex 把「看参数与样张」压到底边对齐（不写死卡头高度） */
+.ep-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.ep-card .ant-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 用途一句：固定两行高度，卡片顶部对齐不参差 */
+.ep-purpose {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(0, 0, 0, 0.65);
+  min-height: 40px;
+}
+
+.ep-fit {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+/* 参数摘要：两列四格（纸张 / 边距 / 字号 / 题距） */
+.ep-brief {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #f0f0f0;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+/* 参数名小灰字，跟在后面的是值 */
+.ep-k {
+  display: inline-block;
+  min-width: 30px;
+  margin-right: 6px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.ep-cardfoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 12px;
+}
+
+/* ── 页尾：新模版怎么来 ──────────────────────────────── */
+.ep-howto {
+  margin-top: 12px;
+}
+
+.ep-flow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.ep-flow-step {
+  padding: 3px 8px;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.ep-flow-arrow {
+  color: rgba(0, 0, 0, 0.25);
+}
+
+/* ── 抽屉内 ─────────────────────────────────────────── */
+.ep-h {
+  margin-top: 20px !important;
+  margin-bottom: 8px !important;
+  font-size: 14px !important;
+}
+
+.ep-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.8;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.ep-note {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.ep-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+/* 纸样舞台：灰底衬出白纸，纸比舞台宽时横向滚动 */
+.ep-stage {
+  padding: 8px 12px 16px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+/* 屏幕缩放：只影响预览观感，不影响打印（打印永远按真实 A4 走） */
+.ep-zoom {
+  width: 210mm;
+  margin: 0 auto;
+}
+
+.ep-z100 {
+  zoom: 1;
+}
+
+.ep-z80 {
+  zoom: 0.8;
+}
+
+.ep-z65 {
+  zoom: 0.65;
+}
+
+/* 样张占位：灰底虚线框，一眼看出「这里本该有张纸，但还没登记」 */
+.ep-sample-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 240px;
+  padding: 24px 16px;
+  text-align: center;
+  background: #fafafa;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+}
+
+/* 占位里的小纸片：A4 比例的空白方块，不用图片不用图标库 */
+.ep-sample-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 62px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 2px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.25);
+}
+
+.ep-sample-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.ep-sample-desc {
+  margin: 0;
+  max-width: 420px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: rgba(0, 0, 0, 0.45);
+}

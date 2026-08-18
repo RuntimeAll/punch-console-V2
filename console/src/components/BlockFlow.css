@@ -1,0 +1,139 @@
+/*
+  块流 v2 样式：行竖着来、行内横着流。
+  - 图不脱流、不浮动、不集中到尾部（原位混排）
+  - 选项一项一盒，短的并排、长的整体折行，盒子内部不许被拆开
+*/
+.bf {
+  color: rgba(0, 0, 0, 0.88);
+  line-height: 1.9;
+}
+
+/* 一行：默认块级（单 cell 的普通段落） */
+.bf-row {
+  margin: 0 0 4px;
+}
+
+.bf-row:last-child {
+  margin-bottom: 0;
+}
+
+/* 🔴 多 cell 的行 = 流式排布：并排放得下就并排，放不下整体折行 */
+.bf-row-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  /* 🔴 列间距别给太大：四个 22% 的图选项 + 三道间距要能落在一行里，窄了才自然折行 */
+  gap: 8px 16px;
+  margin: 6px 0 8px;
+}
+
+.bf-text {
+  margin: 0;
+  white-space: pre-wrap; /* 保留题面里的空格与换行（填空的全角括号靠它对齐） */
+}
+
+/* 配图：按数据给的百分比宽度占位，上下留白（左右 auto = 图居中），与前后文字明显分段但不脱离顺序 */
+.bf-figure {
+  margin: 10px auto 12px;
+  max-width: 100%;
+}
+
+.bf-svg {
+  display: block;
+}
+
+.bf-svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.bf-caption {
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* 图资产断链：如实说出来，别渲成空白让人以为这题没图 */
+.bf-broken {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #d4380d;
+  background: #fff7f6;
+}
+
+/*
+  🔴 选项：一项一个盒子（标号 + 内容），整体参与换行。
+  flex: 0 1 auto —— 不抢占多余空间，但放不下时可以自己缩；min-width 0 保证长文本能内部折行。
+*/
+.bf-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bf-option-label {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.bf-option-body {
+  min-width: 0;
+}
+
+/* 选项内部的图与文字紧凑一些：它是选项的一部分，不该像正文配图那样大留白 */
+.bf-option-body .bf-figure {
+  margin: 2px 0 0;
+}
+
+.bf-option-body .bf-text {
+  display: inline;
+}
+
+.bf-table {
+  margin: 10px 0 12px;
+  overflow-x: auto;
+}
+
+.bf-table table {
+  border-collapse: collapse;
+}
+
+.bf-table th,
+.bf-table td {
+  border: 1px solid #d9d9d9;
+  padding: 4px 10px;
+}
+
+.bf-table th {
+  background: #fafafa;
+  font-weight: 600;
+}
+
+/* compact：列表里的缩略预览，图限高，整体行距收紧 */
+.bf-compact {
+  line-height: 1.7;
+}
+
+/* compact 的正文配图靠左限宽（列表里图不该占半屏）；选项里的图不受这条限制，
+   它的宽度由所属选项盒子决定，砍掉就对不齐了 */
+.bf-compact .bf-figure {
+  margin: 6px 0;
+  max-width: 40%;
+}
+
+.bf-compact .bf-option-body .bf-figure {
+  max-width: 100%;
+}
+
+.bf-compact .bf-row-flow {
+  gap: 4px 16px;
+  margin: 4px 0 6px;
+}

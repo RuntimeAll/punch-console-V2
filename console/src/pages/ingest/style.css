@@ -1,0 +1,168 @@
+/* 录入记录（/ingest）自用样式。只服务这一页，不进公共件。
+   纪律同全站：不铺大色块——状态一律靠 1px/3px 描边 + 小字色区分。 */
+
+.ig-expand {
+  padding: 2px 0 4px;
+}
+
+/* ── 闸报告：整段原样摆出来，不截断（截断了等于没记账）───────── */
+.ig-gate {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.ig-gate .ig-gate-title {
+  margin-bottom: 2px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.ig-gate .ig-gate-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+/* 红灯行 = 要人管的行：左侧 3px 红描边，一眼可见（不涂整行底色）*/
+.ig-item-red td:first-child {
+  box-shadow: inset 3px 0 0 0 #ff4d4f;
+}
+
+/* 绿灯行 = 已经没事的行：压成次要信息，别跟红黄抢注意力 */
+.ig-item-green td {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+/* ── 本批挂着的工单：一行小字 + 链接，去审核台处置 ───────────── */
+.ig-tickets {
+  margin-top: 10px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* ── 页头参考卡（审核等级矩阵 / 执行阀）：折叠态压成一条细线，不跟正文抢位置 ── */
+.ig-ref {
+  margin-bottom: 12px;
+  background: #fafafa;
+}
+
+.ig-ref .ant-collapse-header {
+  font-size: 13px;
+}
+
+/* 矩阵表：只是一张对照表，去掉悬浮高亮，别让人以为能点 */
+.ig-matrix .ant-table-tbody > tr:hover > td {
+  background: transparent;
+}
+
+/* ── 执行阀五条：一条一块，判据原话与本页现况分行 ─────────── */
+.ig-valve {
+  padding: 8px 0;
+  border-bottom: 1px dashed #f0f0f0;
+}
+
+.ig-valve:last-of-type {
+  border-bottom: none;
+}
+
+.ig-valve-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.ig-valve-no {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.ig-valve-name {
+  font-weight: 500;
+}
+
+.ig-valve-quote {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.ig-valve-now {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* ── 展开区里的「本批用哪张模板」一行小字 ─────────────────── */
+.ig-tpl-line {
+  margin-bottom: 10px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+/* ── 录入模板 Tab ─────────────────────────────────────────── */
+.ig-flow {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px dashed #d9d9d9;
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.ig-flow-main {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.ig-flow-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.ig-tpl-card {
+  margin-bottom: 12px;
+}
+
+.ig-tpl-field {
+  padding: 5px 0;
+  border-bottom: 1px dashed #f5f5f5;
+}
+
+.ig-tpl-field:last-child {
+  border-bottom: none;
+}
+
+.ig-tpl-k {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.ig-tpl-v {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.ig-mono {
+  font-family: 'Cascadia Mono', Consolas, Menlo, monospace;
+  font-size: 12px;
+}
+
+.ig-adhoc {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: rgba(0, 0, 0, 0.45);
+}

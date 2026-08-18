@@ -1,0 +1,175 @@
+/* 批改 · 队列（/grading/queue）自用样式。只服务这一页，不进公共件。
+   纪律同全站：不铺大色块——状态一律靠小色点 + 1px/3px 描边 + 小字色区分。 */
+
+/* ── 顶部状态计数条：九格横排 = 整条链 ─────────────────────── */
+.gq-statebar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gq-cell {
+  width: 106px;
+  padding: 6px 9px 7px;
+  font: inherit;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-left-width: 3px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.gq-cell:hover {
+  border-color: #1677ff;
+}
+
+.gq-cell.is-active {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+}
+
+/* 空格子压暗但不隐藏：空本身是信息（这一段现在没堵） */
+.gq-cell.is-zero {
+  opacity: 0.5;
+}
+
+.gq-cell .gq-cell-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.gq-cell .gq-cell-num {
+  display: block;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+/* 人工态的数字给暖色：一眼看出「这几个数是欠着我的」 */
+.gq-cell.is-human .gq-cell-num {
+  color: #d4380d;
+}
+
+.gq-cell.is-zero.is-human .gq-cell-num {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* 🔴 三格红点 = 不点它永远不动 */
+.gq-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff4d4f;
+}
+
+/* ── 表：状态灯 + 行左描边 ─────────────────────────────────── */
+.gq-state-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* 要人动手的行：左侧 3px 暖色描边（不涂整行底色） */
+.gq-row-human td:first-child {
+  box-shadow: inset 3px 0 0 0 #faad14;
+}
+
+.gq-row-fault td:first-child {
+  box-shadow: inset 3px 0 0 0 #ff4d4f;
+}
+
+/* 终态行压成次要信息，别跟在飞的行抢注意力 */
+.gq-row-done td {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* 本地动作（重试/认卷/收卷）产生的行，虚线描边提示「这是本地态，刷新即还原」 */
+.gq-row-local td:first-child {
+  box-shadow: inset 3px 0 0 0 #1677ff;
+}
+
+/* ── 展开区 ───────────────────────────────────────────────── */
+.gq-detail {
+  padding: 2px 0 4px;
+}
+
+.gq-note,
+.gq-pick {
+  padding: 8px 10px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+/* 候选卷要挑选，给条暖色左边提示这是人的活 */
+.gq-pick {
+  border-left: 3px solid #faad14;
+}
+
+.gq-note-title {
+  margin-bottom: 2px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.gq-note-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.gq-timeline {
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.9;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.gq-timeline li {
+  list-style: none;
+}
+
+/* ── 收卷弹窗的三步 ───────────────────────────────────────── */
+.gq-step {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.gq-step .gq-step-no {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border: 1px solid #d9d9d9;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.gq-step .gq-step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.gq-step .gq-step-title {
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.88);
+}

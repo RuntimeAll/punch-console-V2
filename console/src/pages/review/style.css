@@ -1,0 +1,97 @@
+/* 审核台（/review）自用样式。只服务这一页，不进公共件。
+   纪律同全站：不铺大色块——分区靠 1px 描边 + 浅灰底 + 小字色。 */
+
+/* ── 工单卡：左右两栏，窄屏自动堆叠 ─────────────────────── */
+.rv-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+/* 左栏 = 被审的东西（题 / 原始记录），要给足宽度看图 */
+.rv-left {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+/* 右栏 = 判据与动作 */
+.rv-right {
+  flex: 1 1 320px;
+  min-width: 290px;
+}
+
+.rv-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* ── 工单原话：原样摆出来，不改写不截断 ─────────────────── */
+.rv-quote {
+  padding: 8px 10px;
+  border: 1px dashed #d9d9d9;
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: #fafafa;
+  font-size: 13px;
+  line-height: 1.85;
+  color: rgba(0, 0, 0, 0.75);
+  white-space: pre-wrap;
+}
+
+/* ── 原始 payload（隔离行）：等宽字，可滚不撑破卡片 ──────── */
+.rv-pre {
+  margin: 0;
+  max-height: 340px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  background: #fafafa;
+  font-family: 'Cascadia Mono', Consolas, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(0, 0, 0, 0.75);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── 题面框：把「被审的题」和判据面板分开 ───────────────── */
+.rv-stem {
+  padding: 10px 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  background: #fff;
+}
+
+/* ── 已处理区的一条记录 ─────────────────────────────────── */
+.rv-done-row {
+  padding: 6px 0;
+  border-bottom: 1px dashed #f0f0f0;
+  font-size: 13px;
+}
+
+.rv-done-row:last-child {
+  border-bottom: none;
+}
+
+.rv-done-note {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  white-space: pre-wrap;
+}
+
+/* ── 工单行的「来源等级」：一个小标签 + 徽标，跟优先级/现态并排 ──
+   审之前先知道该用多大力气（源有没有守恒基准、等级要不要逐题细审）。 */
+.rv-srclevel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rv-srclevel-k {
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.45);
+}

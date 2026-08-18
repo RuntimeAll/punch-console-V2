@@ -1,0 +1,230 @@
+/* ──────────────────────────────────────────────────────────────
+   打印样卷版式（页面组 D 自用）。
+   所有选择器都收在 .pp-* 作用域内，不改公共件（index.css / BlockFlow.css）。
+   尺寸一律用 mm / pt：这是给纸用的版式，不是给屏幕用的。
+   ────────────────────────────────────────────────────────────── */
+
+.pp-root {
+  padding-bottom: 24px;
+}
+
+/* 屏幕专属工具条（打印时由公共 .no-print 隐藏） */
+.pp-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 12px;
+  text-align: center;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.pp-toolbar-note {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* ── 一张纸 ─────────────────────────────────────────────────
+   .print-sheet（公共）给的是 210mm 宽 / 297mm 高 / 14mm 内衬 / 白纸投影，
+   这里只补「版心参数 + 页脚贴底」。 */
+.pp-sheet {
+  --pp-font: 10.5pt; /* 正文字号 */
+  --pp-line: 1.75; /* 正文行距 */
+  --pp-gap: 6mm; /* 题间距 */
+  --pp-fig: 30mm; /* 配图打印限高 */
+
+  display: flex;
+  flex-direction: column;
+  font-size: var(--pp-font);
+  color: #000;
+}
+
+/* 屏幕上两张纸靠 .print-sheet 的 margin 拉开；打印时强制换页 */
+@media print {
+  .pp-sheet + .pp-sheet {
+    break-before: page;
+    page-break-before: always;
+  }
+}
+
+/* ── 页眉品牌小字 ────────────────────────────────────────── */
+.pp-header {
+  padding-bottom: 2mm;
+  border-bottom: 0.5pt solid #bfbfbf;
+  font-size: 8.5pt;
+  letter-spacing: 0.5px;
+  color: rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+
+/* ── 卷名 ───────────────────────────────────────────────── */
+.pp-titlebar {
+  margin: 7mm 0 4mm;
+  text-align: center;
+}
+
+.pp-title {
+  margin: 0;
+  font-size: 17pt;
+  font-weight: 600;
+  letter-spacing: 1px;
+  line-height: 1.3;
+}
+
+.pp-subtitle {
+  margin: 2mm 0 0;
+  font-size: 10pt;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* ── 姓名 / 日期 / 用时线 ────────────────────────────────── */
+.pp-idline {
+  display: flex;
+  gap: 12mm;
+  padding-bottom: 3mm;
+  border-bottom: 0.5pt solid #d9d9d9;
+  font-size: 10.5pt;
+}
+
+.pp-blank {
+  display: inline-block;
+  height: 1em;
+  border-bottom: 0.5pt solid #595959;
+  vertical-align: -2px;
+}
+
+.pp-blank-name {
+  width: 28mm;
+}
+
+.pp-blank-date {
+  width: 24mm;
+}
+
+.pp-blank-time {
+  width: 16mm;
+}
+
+/* ── 分组条 ─────────────────────────────────────────────── */
+.pp-group {
+  display: flex;
+  align-items: baseline;
+  gap: 3mm;
+  margin: 7mm 0 3mm;
+  padding: 0 0 1.5mm 2.5mm;
+  border-left: 3px solid #595959;
+  border-bottom: 0.5pt solid #f0f0f0;
+}
+
+.pp-group:first-child {
+  margin-top: 5mm;
+}
+
+.pp-group-name {
+  font-size: 11.5pt;
+  font-weight: 600;
+}
+
+.pp-group-hint {
+  font-size: 9pt;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* ── 题目 ───────────────────────────────────────────────── */
+.pp-item {
+  display: flex;
+  gap: 2mm;
+  margin-bottom: var(--pp-gap);
+}
+
+.pp-item:last-child {
+  margin-bottom: 0;
+}
+
+.pp-qno {
+  flex: 0 0 7mm;
+  font-weight: 600;
+}
+
+.pp-qbody {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 🔴 题面/答案一律由公共 <BlockFlow> 混排渲染；这里只在纸样作用域内调字号与图高，
+   绝不改 BlockFlow.css 本体，也绝不把 figure 抽出来另排。 */
+.pp-sheet .bf {
+  font-size: var(--pp-font);
+  line-height: var(--pp-line);
+  color: #000;
+}
+
+.pp-sheet .bf-figure {
+  margin: 2.5mm 0 1.5mm;
+}
+
+.pp-sheet .bf-svg svg {
+  max-height: var(--pp-fig);
+  width: auto;
+}
+
+/* 卷面不出现图注：图注是库内元信息，印在学生卷上等于剧透（例：「两个完全一样的直角梯形拼成长方形」） */
+.pp-sheet .bf-caption {
+  display: none;
+}
+
+/* ── 页脚 ───────────────────────────────────────────────── */
+.pp-footer {
+  margin-top: auto; /* 屏幕纸样上贴到 297mm 纸底；打印时紧跟正文尾部 */
+  padding-top: 6mm;
+  text-align: center;
+}
+
+.pp-footer span {
+  display: inline-block;
+  min-width: 62%;
+  padding-top: 2mm;
+  border-top: 0.5pt solid #d9d9d9;
+  font-size: 8.5pt;
+  letter-spacing: 0.5px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* ── 答案速查页 ─────────────────────────────────────────── */
+.pp-anshead {
+  margin: 5mm 0 4mm;
+  padding-bottom: 2mm;
+  border-bottom: 0.5pt solid #d9d9d9;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6mm;
+}
+
+.pp-anstitle {
+  margin: 0;
+  font-size: 13pt;
+  font-weight: 600;
+}
+
+.pp-ansnote {
+  font-size: 9pt;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.pp-ans-item {
+  display: flex;
+  gap: 2mm;
+  margin-bottom: 5mm;
+}
+
+.pp-ans-item:last-child {
+  margin-bottom: 0;
+}
+
+.pp-hint {
+  margin: 1.5mm 0 0;
+  font-size: 9pt;
+  line-height: 1.6;
+  color: rgba(0, 0, 0, 0.55);
+}

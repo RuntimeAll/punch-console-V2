@@ -1,0 +1,206 @@
+/* 学员页（/grading/:code）自用样式。只服务这一页，不进公共件。
+   纪律：不引第三方主题、不铺大色块——状态一律靠 1px 描边 + 小字色区分。 */
+
+/* ── 天格：一天一格，点开右侧抽屉 ───────────────────────── */
+.gs-daygrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gs-daycell {
+  width: 92px;
+  padding: 7px 8px 6px;
+  font: inherit;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-left-width: 3px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.gs-daycell:hover {
+  border-color: #1677ff;
+}
+
+.gs-daycell.is-active {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+}
+
+.gs-daycell .gs-day-no {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.gs-daycell .gs-day-score {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.gs-daycell .gs-day-state {
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* ── 趋势图：横向可滚，避免窄屏把折线压扁 ───────────────── */
+.gs-trend {
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+/* ── 抽屉里的报告占位块 ─────────────────────────────────── */
+.gs-report {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.gs-report .gs-skeleton-line {
+  height: 8px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background: #f0f0f0;
+}
+
+/* 作废（去掉）的题：整行压暗 + 删除线 */
+.gs-row-dropped td {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+/* ── 终审抽屉两栏：左卷面原图 ｜ 右逐题拍板表 ─────────────
+   左栏 sticky 钉住 + 自己滚：右表往下翻的时候，图不能跟着跑掉。 */
+.gs-split {
+  display: grid;
+  grid-template-columns: minmax(380px, 44%) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.gs-split-left {
+  position: sticky;
+  top: 0;
+  align-self: start;
+}
+
+.gs-split-right {
+  min-width: 0; /* 不给 0 的话表格会把栅格撑破 */
+}
+
+/* 窄屏：两栏摊成上下，图在上、表在下，谁也不挤谁 */
+@media (max-width: 900px) {
+  .gs-split {
+    grid-template-columns: 1fr;
+  }
+
+  .gs-split-left {
+    position: static;
+  }
+}
+
+/* ── 左栏原图本体 ───────────────────────────────────────── */
+.gs-sheet-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 当前高亮题的原话（存疑原因），淡描边不铺色块 */
+.gs-sheet-focus {
+  padding: 5px 8px;
+  margin-bottom: 8px;
+  border: 1px solid #f0f0f0;
+  border-left: 3px solid #faad14;
+  border-radius: 4px;
+  background: #fffdf4;
+}
+
+/* 图的滚动窗：整页原图放在里面，缩放到 100%/150% 时横竖都能滚 */
+.gs-sheet-box {
+  max-height: calc(100vh - 300px);
+  overflow: auto;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+}
+
+@media (max-width: 900px) {
+  .gs-sheet-box {
+    max-height: 62vh;
+  }
+}
+
+.gs-sheet-svg {
+  display: block;
+  margin: 0 auto;
+}
+
+/* 题位框可点：点了右表滚到对应行 */
+.gs-sheet-region {
+  cursor: pointer;
+}
+
+/* 右表：当前题整行浅黄底，和左图的高亮同一个色，眼睛能对上 */
+.gs-qrow.is-focus > td {
+  background: #fffbe6;
+}
+
+/* ── 档案头 + 肖像条（第四轮：定稿 §一 student 扩表落地）───────
+   纪律照旧：不铺色块，chips 一律 1px 描边。 */
+.gs-code {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.gs-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.gs-portrait {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.gs-portrait-label {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+
+.gs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 肖像特征句 = 描边 chip：一句一枚，读得出「拿它去干嘛」 */
+.gs-chip {
+  padding: 2px 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: rgba(0, 0, 0, 0.75);
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 11px;
+}
+
+.gs-portrait-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}

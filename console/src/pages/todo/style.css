@@ -1,0 +1,47 @@
+/* 待办列表（/todo）自用样式。只服务这一页，不进公共件。
+   纪律同全站：不铺大色块——过期/完成一律靠 1px/3px 描边 + 小字色区分。 */
+
+/* 单元格里的第二行小字（id、到期提示、完成时间）*/
+.td-sub {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  line-height: 1.6;
+}
+
+/* 过期 = 红小字；今天到期 = 橙小字。只染字，不染格子 */
+.td-sub-over {
+  color: #cf1322;
+}
+
+.td-sub-soon {
+  color: #d46b08;
+}
+
+/* 过期行：左侧 3px 红描边，一眼可见（不涂整行底色）*/
+.td-row-over td:first-child {
+  box-shadow: inset 3px 0 0 0 #ff4d4f;
+}
+
+/* 已完成 / 已取消行：整行压成次要信息，别跟没做完的抢注意力 */
+.td-row-done td {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* ── 展开区：detail 原话整段摆出来，不截断 ─────────────────── */
+.td-expand {
+  padding: 2px 0 6px;
+}
+
+.td-detail {
+  margin: 0 !important;
+  font-size: 13px;
+  line-height: 1.85;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.td-meta {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: rgba(0, 0, 0, 0.45);
+}

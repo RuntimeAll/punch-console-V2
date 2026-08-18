@@ -19,3 +19,6 @@ __pycache__/
 # ── 系统杂物 ──
 .DS_Store
 Thumbs.db
+
+# punch-console = 独立 git 仓（origin=RuntimeAll/punch-console.git），不并入 v2 仓
+/punch-console/

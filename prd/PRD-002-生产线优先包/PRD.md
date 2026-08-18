@@ -87,4 +87,8 @@
   - [x] 10d console 薄读 API（server/kb-read-api.mjs，node:sqlite 只读 :4310，7 端点）+ 真库两页
     （/kb/questions 左树右表+抽屉公式渲染、/kb/artifacts 册→天→卷下钻）；build 绿+截图目检+注入自测；
     修 antd Table 打回公式原文真 bug；mock 页一律未动
-  - [ ] 10e 实弹按新管线重跑：60 题净题面入库→组 5 paper→从库渲样张（样张停点仍在）→全链到页面可见
+  - [ ] 10e 实弹按新管线重跑——**已到样张停点（2026-08-19）**：60 题净题面过闸入库（草稿，血缘 prov 60/60）
+    →组 D1 paper（12 题）→render-pack→从库渲样张双 PDF 目检全对→展示台真库两页可见
+    （题库 60 题公式真渲/资料册 1 册 1 卷 12 题；:4300 已重启带 /api/kb 代理，:4310 读 API 常驻）；
+    修 Chrome 相对路径废 URL 实伤一处（core+render_paper 同修）。
+    待用户点头 → 组 D2~D5 → 全册双 PDF → finalize（promote+定稿+覆盖考点回填）→ 网盘 → 挂账/物料

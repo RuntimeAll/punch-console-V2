@@ -74,6 +74,9 @@ def to_pdf(html_path, pdf_path, budget_ms=20000):
       ——必须带独立 --user-data-dir 临时 profile；出完验文件真实存在，不存在就抛错不装成功。
     """
     import tempfile
+    # 🔴 相对路径先绝对化（file:///产物/… 是废 URL，Chrome 空载还报成功）
+    html_path = os.path.abspath(html_path)
+    pdf_path = os.path.abspath(pdf_path)
     with tempfile.TemporaryDirectory(prefix='punchkit-chrome-') as prof:
         subprocess.run([CHROME, '--headless=new', '--disable-gpu', '--no-sandbox',
                         '--no-proxy-server',

@@ -384,6 +384,10 @@ def _to_pdf_safe(html_path, pdf_path, budget_ms=20000):
        🔴 撞正开着的 Chrome 会**静默不写文件** ⇒ 必须 `--user-data-dir=<临时 profile>`；
        🔴 本机有代理 ⇒ `--no-proxy-server`。出完立刻验文件真的在。"""
     import subprocess
+    # 🔴 相对路径必先绝对化（2026-08-19 主位实伤）：file:///产物/… 是废 URL，
+    #    Chrome 加载空页、退出码还是 0——"看着成功一个字节没写"。
+    html_path = os.path.abspath(str(html_path))
+    pdf_path = os.path.abspath(str(pdf_path))
     with tempfile.TemporaryDirectory(prefix='chrome_pdf_') as prof:
         subprocess.run([core.CHROME, '--headless=new', '--disable-gpu', '--no-sandbox',
                         '--no-proxy-server', '--user-data-dir=' + prof,
@@ -391,7 +395,7 @@ def _to_pdf_safe(html_path, pdf_path, budget_ms=20000):
                         '--virtual-time-budget=%d' % budget_ms,
                         '--run-all-compositor-stages-before-draw',
                         '--print-to-pdf=' + pdf_path,
-                        'file:///' + str(html_path).replace('\\', '/')],
+                        'file:///' + html_path.replace('\\', '/')],
                        check=True, capture_output=True, timeout=300)
     if not os.path.exists(pdf_path):
         raise PackError('🔴 Chrome 没写出 PDF：%s' % pdf_path)

@@ -510,11 +510,16 @@ def md_lines(blocks, where='?', assets=None):
                     raise PackError('[%s] option 缺 label' % tag)
                 inner = []
                 for b in (cell.get('blocks') or []):
-                    if b.get('type') != 'text':
-                        raise PackError('[%s] option 内嵌 %r 块 —— 图/表选项本版拒渲不静默'
-                                        % (tag, b.get('type')))
-                    inner.append(' '.join(ln.strip() for ln in (b.get('md') or '').split('\n')
-                                          if ln.strip()))
+                    bt = b.get('type')
+                    if bt == 'text':
+                        inner.append(' '.join(ln.strip() for ln in (b.get('md') or '').split('\n')
+                                              if ln.strip()))
+                    elif bt == 'figure':
+                        # 图选项（2026-08-20 实装）：行内带图（choice 槽出件侧另有两列折算）
+                        inner.append(str(figure_html(b, tag, assets)))
+                    else:
+                        raise PackError('[%s] option 内嵌 %r 块 —— 选项只认 text/figure'
+                                        % (tag, bt))
                 pieces.append('%s．%s' % (label, ' '.join(x for x in inner if x)))
             total = sum(len(p) for p in pieces)
             per_line = len(pieces) if total <= 60 else (2 if total <= 120 else 1)
@@ -741,17 +746,25 @@ def adapt_item(item, slot, where='?', assets=None):
                             stem_html.append(md_to_delim(ln.strip(), where + '.题面'))
                 elif t == 'option':
                     label = (cell.get('label') or '').strip()
+                    txt_parts, fig_cells = [], []
                     for b in (cell.get('blocks') or []):
-                        if b.get('type') != 'text':
-                            raise PackError('[%s] 选项 %s 里嵌了 %r 块 —— 🔴 图/表选项本版拒渲不静默'
-                                            '（选项网格是等宽表格，塞图会撑塌列位）'
-                                            % (tag, label or '?', b.get('type')))
-                    inner = ' '.join(
-                        ' '.join(ln.strip() for ln in (b.get('md') or '').split('\n') if ln.strip())
-                        for b in (cell.get('blocks') or []))
+                        bt = b.get('type')
+                        if bt == 'text':
+                            txt_parts.append(' '.join(
+                                ln.strip() for ln in (b.get('md') or '').split('\n') if ln.strip()))
+                        elif bt == 'figure':
+                            # 🔴 图选项（2026-08-20 实装，卷2题5 四数轴选项）：图宽是按整栏
+                            #    标定的百分比，选项格只占 1/cols 栏宽——定完列数再折算，见下。
+                            fig_cells.append(b)
+                        else:
+                            raise PackError('[%s] 选项 %s 里嵌了 %r 块 —— 选项只认 text/figure'
+                                            % (tag, label or '?', bt))
+                    inner = ' '.join(p for p in txt_parts if p)
                     options.append({'label': label,
-                                    'html': md_to_delim(inner, '%s.选项%s' % (where, label)),
-                                    '_len': _plain_len(inner)})
+                                    'html': md_to_delim(inner, '%s.选项%s' % (where, label))
+                                            if inner else '',
+                                    '_len': _plain_len(inner),
+                                    '_figs': fig_cells, '_tag': tag})
                 elif t in ('figure', 'image'):
                     # 🔴 配图题干（2026-08-20 实装）：此前这一支被静默跳过，图整个丢了
                     stem_html.append(str(figure_html(cell, tag, assets)))
@@ -763,8 +776,21 @@ def adapt_item(item, slot, where='?', assets=None):
             raise PackError('[%s] choice 槽但题面无 option 块 —— 选择题包坏形' % where)
         longest = max(o['_len'] for o in options)
         opt_cols = 4 if longest <= 10 else (2 if longest <= 26 else 1)
+        if any(o['_figs'] for o in options):
+            # 图选项两列（对标卷2题5 原卷 2×2 排法）；图宽按列数放大折算回原尺寸，92% 封顶防贴边
+            opt_cols = min(opt_cols, 2)
+            for o in options:
+                for b in o['_figs']:
+                    h = str(figure_html(b, o['_tag'], assets))
+                    m = re.search(r'width:(\d+(?:\.\d+)?)%', h)
+                    if m:
+                        h = h.replace(m.group(0),
+                                      'width:%g%%' % min(92.0, float(m.group(1)) * opt_cols), 1)
+                    o['html'] = (o['html'] + '<br>' if o['html'] else '') + h
         for o in options:
             o.pop('_len', None)
+            o.pop('_figs', None)
+            o.pop('_tag', None)
         # 🔴 答案也传 assets（2026-08-20 修）：此前漏传，答案里带 figure 会被误判「没给 assets」拒渲
         raw = md_lines(ans_blocks, where + '.答案', assets)
         ansline = '；'.join(md_to_delim(x, where + '.答案') for x in raw) if raw else ''

@@ -209,9 +209,15 @@ def unit_choice():
     try:
         RP.md_lines({'v': 2, 'rows': [{'cells': [{'type': 'option', 'label': 'A',
             'blocks': [{'type': 'figure', 'ref': 'x'}]}]}]}, 'T')
-        ok('option 内嵌 figure 拒渲', False, '没抛错')
+        ok('option 内嵌坏 figure（缺 asset）拒渲', False, '没抛错')
     except RP.PackError:
-        ok('option 内嵌 figure 拒渲', True)
+        ok('option 内嵌坏 figure（缺 asset）拒渲', True)
+    try:
+        RP.md_lines({'v': 2, 'rows': [{'cells': [{'type': 'option', 'label': 'A',
+            'blocks': [{'type': 'table', 'md': '|a|\n|-|\n|1|'}]}]}]}, 'T')
+        ok('option 内嵌 table 拒渲', False, '没抛错')
+    except RP.PackError:
+        ok('option 内嵌 table 拒渲', True)
     it = {'question': {'blocks': blocks, 'answer_blocks': None, 'analysis_blocks': None}}
     d = RP.adapt_item(it, 'choice', 'T')
     ok('choice 槽·选项独立占位不进题干', d['ans'] == '' and d['_src'] == '无答案态'
@@ -307,6 +313,20 @@ def unit_figure(root, db):
     dc2 = RP.adapt_item(ch2, 'choice', 'T', A)
     ok('🔴 choice 槽·答案带图不误拒（2026-08-20 修：答案漏传 assets）',
        'B' in dc2['ans'] and '<img class="fig"' in dc2['ans'], repr(dc2['ans'])[:120])
+    fopt = lambda lb: {'type': 'option', 'label': lb, 'blocks': [cell(w='46%')]}      # noqa: E731
+    ch3 = {'question': {'blocks': {'v': 2, 'rows': [
+        {'cells': [{'type': 'text', 'md': '数轴表示正确的是（　）'}]},
+        {'cells': [fopt('A'), fopt('B'), fopt('C'), fopt('D')]}]},
+        'answer_blocks': None, 'analysis_blocks': None}}
+    dc3 = RP.adapt_item(ch3, 'choice', 'T', A)
+    ok('🔴 choice 槽·图选项实装（两列+图宽按列数折算 46%→92%）',
+       dc3['opt_cols'] == 2 and all('<img class="fig"' in o['html'] for o in dc3['options'])
+       and 'width:92%' in dc3['options'][0]['html'], repr(dc3['options'][0])[:160])
+    raises('option 嵌 table 仍拒渲',
+           lambda: RP.adapt_item({'question': {'blocks': {'v': 2, 'rows': [
+               {'cells': [{'type': 'option', 'label': 'A',
+                           'blocks': [{'type': 'table', 'md': 'x'}]}]}]},
+               'answer_blocks': None}}, 'choice', 'T', A), '只认 text/figure')
 
 
 def unit_table(root, db):

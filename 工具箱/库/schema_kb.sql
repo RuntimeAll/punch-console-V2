@@ -189,7 +189,9 @@ CREATE TABLE IF NOT EXISTS artifact (
   delivered_at TEXT,
   link         TEXT,
   note         TEXT,
-  created_at   TEXT
+  created_at   TEXT,
+  -- 售卖态（§2.6c）：🔴 人工列，产线任何代码不许写（能发≠已发）；存量库补列走 apply_ddl_263.py
+  sale_state   TEXT CHECK(sale_state IN ('在售','待整理','停售'))
 );
 
 -- ---------------------------------------------------------------------

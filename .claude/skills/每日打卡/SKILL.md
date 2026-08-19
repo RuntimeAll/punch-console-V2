@@ -1,6 +1,6 @@
 ---
 name: 每日打卡
-description: 制作/续造「每日打卡」类册子——N 天×每天 M 题×一天一页的连续练习册（题目卷+答案卷双 PDF，发网盘售卖）。当用户说"做一个N天打卡""每日打卡""打卡册""每日一练""连着练N天""再来一期打卡""续造下一期""改打卡版式/题量""出一本小册"时用。四步=母题定性→出题入库+组册初稿(🔴用户点头才铺全册)→全量铺开(DSL留档+实算全绿)→发布(网盘+artifact挂账带宣发字段，发布动作永远用户手机人工)。🔴 库中心：题先入库、组册从库取、渲染从库读、页面可看。🔴 v2 编排：两库只经 工具箱 脚本与闸写入，出题段调「举一反三」，组卷走 工具箱/组卷/paper_tool.py，渲染调「渲染出件」，上传调「网盘分发」，物料调「发布物料」，挂账调「资料挂账」。绝不调老区/备课帮任何服务。
+description: 制作/续造「每日打卡」类册子——N 天×每天 M 题×一天一页的连续练习册（题目卷+答案卷双 PDF，发网盘售卖）。当用户说"做一个N天打卡""每日打卡""打卡册""每日一练""连着练N天""再来一期打卡""续造下一期""改打卡版式/题量""出一本小册"时用。四步=母题定性→出题入库+组册初稿(🔴用户点头才铺全册)→全量铺开(DSL留档+实算全绿)→发布(网盘+artifact挂账带宣发字段，发布动作永远用户手机人工)。🔴 库中心：题先入库、组册从库取、渲染从库读、页面可看。🔴 v2 编排：两库只经 工具箱 脚本与闸写入，🔴计算题出题一律 工具箱/dsl/dsl_batch.py 批处理（排班 JSON 一条命令，零 LLM），非计算题出题段调「举一反三」，组卷走 工具箱/组卷/paper_tool.py，渲染调「渲染出件」，上传调「网盘分发」，物料调「发布物料」，挂账调「资料挂账」。绝不调老区/备课帮任何服务。
 ---
 
 # 每日打卡 —— 四步流水线（流程正本=认知/业务流程.md §二）
@@ -10,6 +10,8 @@ description: 制作/续造「每日打卡」类册子——N 天×每天 M 题×
 1. **出题必回流**：**题先入库再组册**（不是出完册子补录）——每道题经 `工具箱/回流/ingest_flow.py`
    入 kb.question（草稿）：blocks v2 + 血缘（prov 记 model_id/params/seed，变式带 mother_qid/variant_op）
    + 考点叶子 + source_kind='model'（自编参数化）/'manual'（手写）。**过三闸才算出完**，拒收就修，不许绕。
+   🔴 **计算题不手工走这条**：一律 `工具箱/dsl/dsl_batch.py run 排班.json`（内部就是这条通路，
+   出题+打标+实算+入库+组卷 spec 一条命令，全程零 LLM，见 §2.2）。
 2. **模型必留档**：母题定性产出的解题模型 `model_tool.py solution-add` 进 solution_model；
    每个考点的出题路径（DSL 生成器）`model_tool.py exam-add` 进 exam_model（dsl_ref 指向真文件）——
    保证**每个考点后续都能持续再出题**。
@@ -36,8 +38,11 @@ description: 制作/续造「每日打卡」类册子——N 天×每天 M 题×
 确定考察范围/考点/解题方式/核心关键：
 - 每类题写清「触发特征→动作结论」→ `model_tool.py solution-add`（tier/freq 双旋钮，表驱动）；
 - 计算类直接定 DSL 配方（参数域/难度档）→ 写生成器（见 §2）后 `model_tool.py exam-add`。
-- 现成 DSL 底座：`工具箱/dsl/有理数混合运算_qbank.py`（13 生成器+verify 双路闸，照它的骨架写新的）；
-  结构型题参考 `工具箱/dsl/参考-三上混合运算/`（表达式树；🔴 其出题器 API 段 v2 禁用）。
+  🔴 `--params` **必须含生成器名**（如 `{"gens":["gen_addsub_chain","gen_frac_addsub"],"lv":[1,3]}`）——
+  批处理靠 `dsl_ref + params 含 gen 名` 从库里解析 model_id，params 不写 gen 名 = 后续整册拒跑。
+- 现成 DSL 底座：`工具箱/dsl/有理数混合运算_qbank.py`（13 生成器+verify 双路闸+文末 `GEN_META`
+  打标规律，照它的骨架写新的）；结构型题参考 `工具箱/dsl/参考-三上混合运算/`
+  （表达式树；🔴 其出题器 API 段 v2 禁用）。
 
 ## 2. 第二步 · 出题入库 + 组册初稿（🚧 审核门）
 
@@ -46,35 +51,57 @@ artifact→paper→paper_item 结构，PDF 只是它的一次出件。
 
 1. **先查库**：逐考点 `model_tool.py coverage --kp <考点>` 对账，库存够就直接用（组卷 `take`
    自动只捞**未进过任何卷**的题）；不够的缺口才进第 2 步新造。
-2. **不够才新造**：选模版别 fork——`cd .claude/skills/每日打卡/_模板 && python -m punchkit` 看骨架菜单；
-   一本册 = 骨架(layouts, 学科无关) × 渲染器(renderers, 学科相关)；`LAYOUT='<key>'` 一行换装。
-   🔴 绝不在册 `_源/` 里私长 CSS。新造题走 DSL：建 `产物/打卡/<册名>/_源/qbank.py`
-   （DSL 单一事实源：题面/过程/答案同源一组参数，verify() 三断言=题面零重复/同天同节答案不撞/题量配比）。
-3. **入库（草稿）**：qbank 吐题目包 JSON（blocks v2 + kp 名 + prov{model_id,params,seed} + confidence）→
+2. 🔴🔴 **不够才新造——计算题一律批处理，全程零 LLM**（2026-08-19 用户拍板：
+   「计算题本身就是模型AI生成的，有对应的DSL，不应该直接生成，应该批处理，和规律入库，
+   不然损耗太大了」）。写一份**排班计划**（🔴 数据不是代码，样例=`工具箱/dsl/_样例/排班-样例.json`），
+   一条命令跑完 出题→实算→打标→入库→组卷 spec：
+   ```powershell
+   python 工具箱/dsl/dsl_batch.py run <排班.json> --check-only    # 先干跑（全程回滚，不写库）
+   python 工具箱/dsl/dsl_batch.py run <排班.json> --assemble      # 真入库（草稿）+ 直接组册
+   ```
+   - 排班里一条 = `["gen_名", 题数, 难度档lv]`；换题型/题量/难度 = **改 JSON，不改代码**。
+   - **打标规律的唯一事实源在 DSL 本体**：`GEN_META`（生成器→考点叶子 id）+ `DIFF_BY_LV`（lv→难度）；
+     exam_model 由工具按 `dsl_ref + params 含 gen 名` 从库里解析——**查不到整体拒跑**
+     （先 `model_tool.py exam-add`；飞轮铁律②硬闸，不许静默降级为无模型入库）。
+   - 去重口径：题面全册精确去重 + 骨架限次逐级放宽 (卷内,全册)=(2,5)→(4,8)→(6,14)。
+   - `qb.verify()` 不全绿 → 整体退出码 1，一题不入库。
+   - 🔴 **agent 不再为每册手写 gen 脚本**（老做法把规律散在册子里，改一处别处不跟=损耗）。
+   - 🔴 **LLM 在本产线只出现在两处**：①写**新的 DSL 生成器**（现有生成器覆盖不到的新题型，
+     照 `工具箱/dsl/有理数混合运算_qbank.py` 骨架写，写完补 `GEN_META` 一行 + `exam-add`）；
+     ②**非计算题**（应用题/证明题等）的题面创作。出题/打标/实算/入库/组卷全程零 LLM。
+3. **非计算题才走手工入库**：题目包 JSON（blocks v2 + kp 名 + prov + confidence）→
    `ingest_flow.py check` 干跑 → `ingest_flow.py ingest`。
    🔴 **题面 md 只放算式/文字本体，不带「计算：」类指令词**（见 §5 坑清单最后一条）。
-4. **组册**：写组卷 spec（样例=`工具箱/组卷/paper_tool.py` 文件头；一天一个 paper，
-   `layout.sections` 与 `sections[].name` 必须同名对位）→
+4. **版式选模版别 fork**：`cd .claude/skills/每日打卡/_模板 && python -m punchkit` 看骨架菜单；
+   一本册 = 骨架(layouts, 学科无关) × 渲染器(renderers, 学科相关)；`LAYOUT='<key>'` 一行换装。
+   🔴 绝不在册 `_源/` 里私长 CSS。版式参数落排班的 `layout_defaults`（工具合成进每卷 layout）。
+5. **组册**：批处理 `--assemble` 已经把册组好了（spec=`<排班名>-组卷spec.json`，qids 已回填）；
+   只在**非计算题**或要手改配比时才自己写组卷 spec（样例=`工具箱/组卷/paper_tool.py` 文件头；
+   一天一个 paper，`layout.sections` 与 `sections[].name` 必须同名对位）→
    `python 工具箱/组卷/paper_tool.py assemble --spec <组卷.json>`。
    第一次不给 `artifact.id`（工具建壳并回吐 id），之后重排都带上它。
    组卷闸会拒：退役题/裸题、同册重复题、take 取不足（**如实报差额，绝不静默凑**）、节名对不上 layout。
-5. **渲样张（从库读）**：
+6. **渲样张（从库读）**：
    `paper_tool.py render-pack --artifact <id> --paper-ord 1 --out 产物/打卡/<册名>/_源/render-pack-d1.json`
    → `python 工具箱/渲染/render_paper.py <那个 json> --out-dir 产物/打卡/<册名> --stem <册名>`
    （管道与坑单走「渲染出件」skill）→ PDF 转 PNG 逐页目检 → 连 `大纲.md`（考点覆盖表）交用户。
-6. 🔴🔴 **门禁：用户点头（含排版过审）才进第三步**——这是流程固有闸，不算"停下等人"违例。
+7. 🔴🔴 **门禁：用户点头（含排版过审）才进第三步**——这是流程固有闸，不算"停下等人"违例。
 
 ## 3. 第三步 · 全量铺开 20/30 天（逐天同口径，DSL 出题路径必留档）
 
-1. 钉死定稿版式，**逐天重复第二步的 1→4**：库存优先取（`take.unused_only=true`）→ 缺口 DSL 新造 →
+1. 钉死定稿版式，**计算题册：把 20/30 天全部写进同一份排班的 `papers`，一条命令铺完**——
+   `python 工具箱/dsl/dsl_batch.py run <排班.json> --assemble`
+   （排班带 `artifact.id` 就往已有册里续；去重是**全册**口径，跨天不撞题）。
+   非计算题按第二步的 1→3→5 逐天走：库存优先取（`take.unused_only=true`）→ 缺口新造 →
    `ingest_flow.py ingest` 入草稿 → spec 追加 dayN 的 paper → `paper_tool.py assemble` 一次铺完。
    🔴 assemble **幂等**：同 artifact+ord 的卷重跑=清掉该卷旧题重排（组卷是编排动作），整册重排放心跑。
    出题段需要"照母题/教辅再生"时**调「举一反三」skill**（单向调用，血缘全程入库）。
 2. **自编题全量实算过闸**：qbank `verify()` 全绿（逐题机器实算/解集唯一/册内查重——
-   🔴 只在本册内查，跨册撞题不拦/范围闸/题面纯净/难度对表）；
-   交解析卷加跑 `python 工具箱/验算/逐行恒等校验.py`（答案对≠过程对）。
-3. **DSL 留档**：新写的生成器文件放 `工具箱/dsl/` 或册 `_源/`（相对路径），
-   `model_tool.py exam-add --dsl-ref <相对路径>` 挂到考点。
+   🔴 只在本册内查，跨册撞题不拦/范围闸/题面纯净/难度对表）；批处理已把它焊在入库前
+   （不绿=退出码 1，一题不入）。交解析卷加跑 `python 工具箱/验算/逐行恒等校验.py`（答案对≠过程对）。
+3. **DSL 留档**：新写的生成器文件放 `工具箱/dsl/`（相对路径），文末 `GEN_META` 补该生成器的
+   `{'kp': 叶子id}` 一行，再 `model_tool.py exam-add --dsl-ref <相对路径> --params '{"gens":["gen_名"]}'`
+   挂到考点。🔴 这两处缺一，批处理下次就整体拒跑（这是有意的：规律不入库=后续再也出不了这类题）。
 4. **对账**：`paper_tool.py list --artifact <id>`（卷数=天数、每卷题数=每天题量）+
    `paper_tool.py show --paper <卷id>` 抽查题序与节归属。对不上就改 spec 重跑 assemble，别手改库。
 

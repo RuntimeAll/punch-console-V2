@@ -1,0 +1,28 @@
+{
+ "_说明": [
+  "计算题 DSL 批处理的排班计划样例（契约见 工具箱/dsl/dsl_batch.py 文件头）。",
+  "🔴 数据不是代码：铺一册 = 复制本文件改 papers，绝不再为每册手写 gen 脚本。",
+  "跑法：python 工具箱/dsl/dsl_batch.py run <本文件> [--check-only] [--assemble]",
+  "gens 里每条 = [生成器名, 题数, 难度档 lv]；生成器→考点的打标规律在 DSL 本体的 GEN_META 里，",
+  "exam_model 由工具从库里按 dsl_ref+gen 名解析（查不到整体拒跑：先 model_tool exam-add）。"
+ ],
+ "dsl": "有理数混合运算_qbank",
+ "seed": 20260819,
+ "artifact": {"name": "七上有理数·两天样例", "kind": "打卡册", "source_line": "每日打卡"},
+ "layout_defaults": {
+  "layout": "dense_sections",
+  "body_pt": 12.5,
+  "watermark": null,
+  "section": {"slot": "expr", "grid": "block", "gap": 0, "gap_each": 11, "ans_cols": 1}
+ },
+ "papers": [
+  {"kind": "打卡天", "title": "第一天·有理数的加减", "ord": 1, "sections": [
+   {"name": "整数加减混合链", "gens": [["gen_addsub_chain", 4, 1]]},
+   {"name": "分数加减·先通分", "gens": [["gen_frac_addsub", 4, 1]]}
+  ]},
+  {"kind": "打卡天", "title": "第二天·绝对值与滚动复习", "ord": 2, "sections": [
+   {"name": "绝对值参与的加减", "gens": [["gen_abs_chain", 4, 1]]},
+   {"name": "加减滚动复习", "gens": [["gen_addsub_chain", 2, 2], ["gen_frac_addsub", 2, 2]]}
+  ]}
+ ]
+}

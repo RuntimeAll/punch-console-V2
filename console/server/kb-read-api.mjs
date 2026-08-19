@@ -199,6 +199,32 @@ function subtreeIds(db, kpId) {
   return out
 }
 
+/**
+ * 字典标签 → 码（域内精确；已是码值则原样回）。
+ * 🔴 翻不出返回 null——调用方必须如实标进 unresolved 并把结果压成 0 条，
+ *    绝不当「不过滤」糊过去（那是把「查不到」显示成「全都有」）。
+ */
+function dictCode(db, domain, word) {
+  const w = String(word).trim()
+  if (!w) return null
+  let r = one(db, 'SELECT code FROM dict_item WHERE domain = ? AND label = ? AND status = ?', domain, w, '在用')
+  if (r) return r.code
+  r = one(db, 'SELECT code FROM dict_item WHERE domain = ? AND code = ? AND status = ?', domain, w, '在用')
+  return r ? r.code : null
+}
+
+/** 标签 `域:名` 或 `名` → tag id 表（跨域同名=该条件内 OR）；零命中返回 [] */
+function resolveTag(db, spec) {
+  const seg = String(spec).split(/[:：]/) // 全角冒号也认（中文输入常态）
+  const name = (seg.length > 1 ? seg.slice(1).join(':') : seg[0]).trim()
+  const domain = seg.length > 1 ? seg[0].trim() : null
+  if (!name) return []
+  const rows = domain
+    ? all(db, 'SELECT id FROM tag WHERE domain = ? AND name = ?', domain, name)
+    : all(db, 'SELECT id FROM tag WHERE name = ?', name)
+  return rows.map((r) => r.id)
+}
+
 /** kp 全路径（版本 › 年级学期 › 单元 › 小节 › 考点） */
 function kpPath(db, kpId) {
   const seg = []
@@ -265,6 +291,47 @@ function epQuestions(db, q) {
     where.push('q.source_kind = ?')
     args.push(sk)
   }
+
+  // ── D-20 找题维度扩参（🔴 口径正本=工具箱/检索/query_core.py，此处是它的 js 孪生：
+  //    同一维度的 SQL 形状照抄，改一边必须改另一边，否则页面查到的和组卷取到的会悄悄不一致。
+  //    不起 python 子进程——读 API 必须是「进程内一次 SQL」，起子进程会把只读薄口变成慢胖口。）──
+  const unresolved = {}
+  for (const [key, domain, col] of [
+    ['qtype', 'qtype', 'q.qtype_code'],
+    ['difficulty', 'difficulty', 'q.diff_code'],
+  ]) {
+    const vals = q.getAll(key).filter(Boolean) // 同维度多值 = OR
+    if (!vals.length) continue
+    const codes = vals.map((v) => dictCode(db, domain, v))
+    const miss = vals.filter((_v, i) => codes[i] === null)
+    if (miss.length) {
+      unresolved[key] = miss
+      where.push('1 = 0') // 🔴 翻不出就是 0 条，不许静默当"不过滤"
+      continue
+    }
+    where.push(`${col} IN (${marks(codes.length)})`)
+    args.push(...codes)
+  }
+  for (const t of q.getAll('tag').filter(Boolean)) {
+    // 多个标签 = AND（标签是收窄用的，与 query_core 同口径）
+    const ids = resolveTag(db, t)
+    if (!ids.length) {
+      ;(unresolved.tag ||= []).push(t)
+      where.push('1 = 0')
+      continue
+    }
+    where.push(`q.id IN (SELECT question_id FROM question_tag WHERE tag_id IN (${marks(ids.length)}))`)
+    args.push(...ids)
+  }
+  const unusedRaw = q.get('unused')
+  let unused = null
+  if (unusedRaw !== null && unusedRaw !== '') {
+    unused = !/^(0|false|no|否)$/i.test(unusedRaw) // unused=1/true/空值都算「要未用过的」
+    where.push(
+      `${unused ? 'NOT EXISTS' : 'EXISTS'} (SELECT 1 FROM paper_item pi WHERE pi.question_id = q.id)`,
+    )
+  }
+
   const sql = where.length ? ` WHERE ${where.join(' AND ')}` : ''
   const total = one(db, `SELECT COUNT(*) AS c FROM question q${sql}`, ...args).c
   const rows = all(
@@ -310,6 +377,17 @@ function epQuestions(db, q) {
     size,
     kp_filter: kpHit ? { ...kpHit, word: kpWord } : null,
     kp_unresolved: kpMiss, // 🔴 词没 resolve 到，页面照实说
+    // 🔴 同上：题型/难度/标签翻不出的词原样回给页面，页面必须显示「这个词库里没有」而不是「没有结果」
+    unresolved: Object.keys(unresolved).length ? unresolved : null,
+    filters: {
+      kp: kpWord || null,
+      status: status || null,
+      source_kind: sk || null,
+      qtype: q.getAll('qtype'),
+      difficulty: q.getAll('difficulty'),
+      tag: q.getAll('tag'),
+      unused,
+    },
     rows: rows.map((r) => ({
       id: r.id,
       stem: stemBrief(r.blocks_json),
@@ -557,7 +635,9 @@ const server = createServer((req, res) => {
       endpoints: [
         'GET /api/kb/stats',
         'GET /api/kb/kg/tree',
-        'GET /api/kb/questions?kp=&status=&source_kind=&page=&size=',
+        'GET /api/kb/questions?kp=&status=&source_kind=&qtype=&difficulty=&tag=&unused=&page=&size=' +
+          '（qtype/difficulty/tag 可重复给：同名多值 qtype/difficulty=OR、tag=AND；' +
+          'tag 写「域:名」或「名」；unused=1 未进过卷 / unused=0 进过卷）',
         'GET /api/kb/questions/:id',
         'GET /api/kb/artifacts',
         'GET /api/kb/artifacts/:id',

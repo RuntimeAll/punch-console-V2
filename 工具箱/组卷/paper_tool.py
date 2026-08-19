@@ -35,8 +35,12 @@
     "sections": [{
       "name": "整数加减混合链",                    # 🔴 必须在 layout.sections 里有同名节
       "qids": ["q2026…"],                          # 取题路一：显式指定（非退役即可）
-      "take": {"kp": "考点名/别名/id", "difficulty": "巩固",
+      "take": {"kp": "考点名/别名/id前缀", "difficulty": "巩固",
                "unused_only": true, "limit": 2},   # 取题路二：从库取（限 草稿/上架）
+      # take 的条件走 工具箱/检索/query_core.py（与「找题」同一个查询核），可用维度：
+      #   kp（名/别名→叶子；数字 id 前缀=整枝，如 100002 取整章）/ difficulty / qtype /
+      #   tag（"域:名"，多个=AND）/ pattern / model（prov.model_id）/ source_kind /
+      #   mother（取某题的变体）/ siblings（同母兄弟）/ text（题面子串）/ unused_only / limit
       "score": null                                # 可选，整节同分（打卡册留空）
     }]
   }]
@@ -44,7 +48,6 @@
 """
 import argparse
 import json
-import re
 import sys
 import time
 import uuid
@@ -54,7 +57,11 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '库'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '检索'))
 from gates import assert_leaf_kp, LeafKpError  # noqa: E402
+# 🔴 take 的取题条件不在这里手写 SQL：与「找题」共用同一个查询核（D-20 ①②层），
+#    两处各写一份 SQL = 组卷取到的题和页面/CLI 查到的题会悄悄不一致（口径漂移是查不出来的错）。
+from query_core import find_ids, QueryError  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / '知识库' / 'kb.db'
@@ -90,46 +97,6 @@ def log_skill(conn, action, digest, result, detail, t0):
 # ══════════════════════════════════════════════════════════════════════
 # 公共原语
 # ══════════════════════════════════════════════════════════════════════
-def resolve_kp_words(conn, words):
-    """词表→现行叶子 id 表；任何一个 resolve 不出就整体失败（取题锚点不许猜）。"""
-    ids = []
-    for w in words or []:
-        w = str(w)
-        if re.fullmatch(r'\d{6,15}', w):
-            assert_leaf_kp(conn, w)
-            ids.append(w)
-            continue
-        hits = [r[0] for r in conn.execute('SELECT id FROM kp WHERE name=?', (w,))]
-        if not hits:
-            hits = [r[0] for r in conn.execute('SELECT kp_id FROM kp_alias WHERE alias=?', (w,))]
-        leaf = []
-        for h in dict.fromkeys(hits):
-            try:
-                assert_leaf_kp(conn, h)
-                leaf.append(h)
-            except LeafKpError:
-                pass
-        if len(leaf) != 1:
-            sys.exit(f'🔴 考点 {w!r} resolve 命中 {len(leaf)} 个（要恰一）：{leaf}——写 id 消歧或先补 KG')
-        ids.append(leaf[0])
-    return list(dict.fromkeys(ids))
-
-
-def dict_code(conn, domain, label):
-    """中文标签→字典码；翻不出如实报错不猜。已是码值则原样回。"""
-    if not label:
-        return None
-    row = conn.execute('SELECT code FROM dict_item WHERE domain=? AND label=? AND status=?',
-                       (domain, label, '在用')).fetchone()
-    if row:
-        return row[0]
-    row = conn.execute('SELECT code FROM dict_item WHERE domain=? AND code=? AND status=?',
-                       (domain, label, '在用')).fetchone()
-    if row:
-        return row[0]
-    sys.exit(f'🔴 {domain} 标签 {label!r} 字典翻不出（dict_item 无此条）——翻不出的不猜')
-
-
 def dict_label(conn, domain, code):
     """字典码→中文标签（render-pack 吐中文；翻不出原样回码，绝不静默丢）。"""
     if not code:
@@ -183,8 +150,29 @@ def used_in_artifact(conn, artifact_id, qid):
         'WHERE p.artifact_id=? AND pi.question_id=? LIMIT 1', (artifact_id, qid)).fetchone()
 
 
+# take 支持的取题维度（键名 → query_core 过滤器键 + 差额报告里的中文说法）。
+# 🔴 走查询核=「找题」有的维度组卷都能用：标签/pattern/模型/血缘/题面子串一并可取，
+#    加维度只需在这张表加一行，SQL 一行都不用碰。
+TAKE_DIMS = [
+    ('kp', 'kp', '考点'),
+    ('difficulty', 'difficulty', '难度'),
+    ('qtype', 'qtype', '题型'),
+    ('tag', 'tag', '标签'),
+    ('pattern', 'pattern', '题型目录'),
+    ('model', 'model', '考察模型'),
+    ('source_kind', 'source_kind', '来源类'),
+    ('mother', 'mother', '母题变体'),
+    ('siblings', 'siblings', '同母兄弟'),
+    ('text', 'text', '题面含'),
+]
+TAKE_KEYS = {k for k, _, _ in TAKE_DIMS} | {'unused_only', 'limit'}
+
+
 def take_questions(conn, artifact_id, take, tag, errs):
-    """从库取题：kp（叶子）+ difficulty（中文标签）+ unused_only（全库未进过任何卷）+ limit。
+    """从库取题（D-20 ①②层，条件构造全部委托 工具箱/检索/query_core.py）。
+
+    维度：kp（名/别名→叶子，或数字 id 前缀=整枝）+ difficulty/qtype（中文标签）+ 标签/pattern/模型/血缘/
+    题面子串 + unused_only（全库未进过任何卷）+ limit；取库存限 status ∈ ('草稿','上架')。
 
     🔴 取不足如实报差额并整体失败（绝不静默凑）；同 artifact 已用的题不进候选（重复由本条兜住）。
     """
@@ -192,38 +180,32 @@ def take_questions(conn, artifact_id, take, tag, errs):
     if not isinstance(limit, int) or limit <= 0:
         errs.append(f'{tag} take.limit={limit!r} 非法（要正整数）')
         return []
-    where = ["q.status IN ('草稿','上架')"]
-    params = []
-    kp_word = take.get('kp')
-    if kp_word:
-        kid = resolve_kp_words(conn, [kp_word])[0]
-        where.append('EXISTS (SELECT 1 FROM question_kp qk WHERE qk.question_id=q.id AND qk.kp_id=?)')
-        params.append(kid)
-    if take.get('difficulty'):
-        where.append('q.diff_code=?')
-        params.append(dict_code(conn, 'difficulty', take['difficulty']))
-    if take.get('qtype'):
-        where.append('q.qtype_code=?')
-        params.append(dict_code(conn, 'qtype', take['qtype']))
+    unknown = sorted(set(take) - TAKE_KEYS)
+    if unknown:
+        errs.append(f'{tag} take 里有未知键 {unknown}——拼错的取题条件绝不静默忽略（那会静默多取题）。'
+                    f'可用：{sorted(TAKE_KEYS)}')
+        return []
+
+    filters = {
+        'status': list(STOCK_STATUS),
+        # 同 artifact 内已用的题一律不进候选（组卷闸「一题不出现两次」的前置过滤）
+        'not_in_artifact': artifact_id,
+    }
+    cond = []
+    for key, fkey, cn in TAKE_DIMS:
+        if take.get(key):
+            filters[fkey] = take[key]
+            cond.append(f'{cn}={take[key]}')
     if take.get('unused_only', True):
-        where.append('NOT EXISTS (SELECT 1 FROM paper_item pi WHERE pi.question_id=q.id)')
-    # 同 artifact 内已用的题一律不进候选（组卷闸「一题不出现两次」的前置过滤）
-    where.append('NOT EXISTS (SELECT 1 FROM paper_item pi JOIN paper p ON p.id=pi.paper_id '
-                 'WHERE p.artifact_id=? AND pi.question_id=q.id)')
-    params.append(artifact_id)
-    sql = ('SELECT q.id FROM question q WHERE ' + ' AND '.join(where) +
-           ' ORDER BY q.created_at, q.id LIMIT ?')
-    hits = [r[0] for r in conn.execute(sql, params + [limit])]
+        filters['unused'] = True
+        cond.append('仅未用过')
+
+    try:
+        hits = find_ids(conn, filters, order='created', limit=limit)
+    except QueryError as e:
+        errs.append(f'{tag} take 条件立不住：{e}')
+        return []
     if len(hits) < limit:
-        cond = []
-        if kp_word:
-            cond.append(f'考点={kp_word}')
-        if take.get('difficulty'):
-            cond.append(f'难度={take["difficulty"]}')
-        if take.get('qtype'):
-            cond.append(f'题型={take["qtype"]}')
-        if take.get('unused_only', True):
-            cond.append('仅未用过')
         errs.append(
             f'{tag} take 取不足：要 {limit} 道（{"，".join(cond) or "无过滤"}，限 状态∈{STOCK_STATUS}），'
             f'库里只捞到 {len(hits)} 道，**差 {limit - len(hits)} 道**——'
@@ -461,6 +443,19 @@ def cmd_finalize(conn, args):
         (args.artifact,))]
     if dead:
         sys.exit(f'🔴 册内含已退役题 {dead}——定稿前先重排（assemble 重跑换题）')
+
+    # 🔴 闸④（先审后上架）：finalize 也是 promote 通路，挂审核工单的题一样拦——不许留后门
+    from gates import GateError, assert_promotable
+    blocked = []
+    for qid in qids:
+        try:
+            assert_promotable(conn, qid)
+        except GateError as e:
+            blocked.append(str(e))
+    if blocked:
+        for b in blocked:
+            print('  ✗ ' + b)
+        sys.exit(f'🔴 finalize 中止：{len(blocked)} 道题被闸④拦下（先审后上架），先清工单再定稿')
 
     conn.execute('BEGIN')
     conn.execute("UPDATE paper SET status='定稿' WHERE artifact_id=?", (args.artifact,))

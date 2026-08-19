@@ -593,6 +593,28 @@ def kp_report(items):
     return {KP_CN[k]: v for k, v in cnt.items()}
 
 
+# ────────────────────────── 批处理打标规律（2026-08-19 下沉） ──────────────────────────
+# 生成器 → 打标规律（批处理入库的唯一事实源；kp=KG 现行叶子 id，diff 按 lv 查表）
+# 🔴 规律在 DSL 本体里，不在每册的手写脚本里——册脚本一散，同一个生成器就会被标成两种考点。
+#    批处理入口 = 工具箱/dsl/dsl_batch.py（读本表打标，exam_model 从库里按 dsl_ref+gen 名解析）。
+GEN_META = {
+    'gen_addsub_chain':    {'kp': '100002002002'},
+    'gen_frac_addsub':     {'kp': '100002002002'},
+    'gen_abs_chain':       {'kp': '100001003003'},
+    'gen_pow_mixed':       {'kp': '100002005001'},
+    'gen_bare_pow_chain':  {'kp': '100002005001'},
+    'gen_dist_forward':    {'kp': '100002003002'},
+    'gen_dist_reverse':    {'kp': '100002003002'},
+    'gen_div_by_unit_frac': {'kp': '100002003002'},
+    'gen_dec_chain':       {'kp': '100002001002'},
+    'gen_frac_div':        {'kp': '100002004002'},
+    'gen_dec_frac_mix':    {'kp': '100002006001'},
+    'gen_mixed_long':      {'kp': '100002006001'},
+    'gen_nested_paren':    {'kp': '100002006001'},
+}
+DIFF_BY_LV = {1: '巩固', 2: '中档', 3: '压轴'}
+
+
 if __name__ == '__main__':
     paper = build_paper(seed=20260805, quota=MODI_QUOTA, lv=1)
     ok = verify(paper, '摸底卷')

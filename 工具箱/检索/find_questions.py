@@ -3,8 +3,11 @@
 
 三层（正本=认知/数据结构.md §三c）：
   ①精确过滤（难度/题型/状态/来源类）+ ②倒排（考点/标签/模型/pattern/血缘/使用足迹）= query_core 纯 SQL；
-  ③语意层 `--like "自然语言描述"` = embed_tool（本地 bge sidecar），
-    🔴 **先 SQL 过滤再向量排序**——语意层只负责排序，不负责放宽条件。
+  ③语意层两种锚点，🔴 **都先 SQL 过滤再向量排序**（语意层只负责排序，不负责放宽条件）：
+      `--like "自然语言描述"` —— 现算查询向量（serve 在走 serve，不在回落冷载 sidecar）；
+      `--like-qid <QID>`      —— **以题找题**：直取库里那道题的 question_vec 向量当锚，
+                                 不载模型、不走 serve、不起 sidecar；该题没向量=报错给补算命令。
+    两者**互斥**（同时给=两个锚点，拒查不猜）。
 
 用法（--db 缺省=脚本位置自解析 <v2根>/知识库/kb.db；worktree 里跑=天然沙盘）：
   python 工具箱/检索/find_questions.py --kp 相反数 --difficulty 巩固 --unused
@@ -12,6 +15,7 @@
   python 工具箱/检索/find_questions.py --siblings q2026… --include-self
   python 工具箱/检索/find_questions.py --in-artifact A2026… --count
   python 工具箱/检索/find_questions.py --kp 100002 --like "路程速度时间的应用题" --topk 5
+  python 工具箱/检索/find_questions.py --like-qid q20260819dc7d0042 --topk 5   # 找跟这题像的
   python 工具箱/检索/find_questions.py --model EM-mix --ids-only     # 喂给别的脚本
 组合条件**一律 AND**（同一维度内多值：考点/题型/难度/状态/来源/pattern 是 OR，标签是 AND）。
 输出行：id / 难度 / 状态 / 进过几卷 / 考点名 / 题面首块（截 60）。
@@ -28,7 +32,8 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import embed_tool  # noqa: E402
-from query_core import QueryError, count, explain, fetch_rows, find_ids, rows_by_ids  # noqa: E402
+from query_core import (QueryError, count, explain, fetch_rows, find_ids,  # noqa: E402
+                        first_text, rows_by_ids)
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / '知识库' / 'kb.db'
@@ -94,11 +99,19 @@ def main():
     m.add_argument('--used', action='store_true', help='至少进过一卷')
     g.add_argument('--in-artifact', dest='in_artifact', metavar='AID', help='进过该册')
     g.add_argument('--not-in-artifact', dest='not_in_artifact', metavar='AID', help='没进过该册')
-    g = ap.add_argument_group('③ 语意层（本地 bge sidecar）')
+    g = ap.add_argument_group('③ 语意层（常驻 serve 优先，回落本地 bge sidecar）')
     g.add_argument('--like', metavar='描述', help='自然语言描述；🔴 先按上面的过滤器过 SQL，再在候选里按语意排序')
+    g.add_argument('--like-qid', dest='like_qid', metavar='QID',
+                   help='**以题找题**：直取该题 question_vec 向量当锚排序（不载模型/不走 serve/不起 sidecar）；'
+                        '该题没算过向量=报错给补算命令，绝不静默。🔴 与 --like 互斥')
     g.add_argument('--topk', type=int, default=8, help='语意层返回条数（缺省 8）')
-    g.add_argument('--venv', help=f'sidecar venv 里的 python（缺省 {embed_tool.DEFAULT_VENV}）')
-    g.add_argument('--model-dir', dest='model_dir', help=f'模型权重根（缺省 {embed_tool.DEFAULT_MODEL_DIR}）')
+    g.add_argument('--venv', help=f'sidecar venv 里的 python（缺省 本位→主位：{embed_tool.MAIN_VENV}）')
+    g.add_argument('--model-dir', dest='model_dir',
+                   help=f'模型权重根（缺省 本位→主位：{embed_tool.MAIN_MODEL_DIR}）')
+    g.add_argument('--serve-port', dest='serve_port', type=int,
+                   help=f'常驻 serve 端口（缺省 {embed_tool.DEFAULT_SERVE_PORT}）')
+    g.add_argument('--no-serve', dest='no_serve', action='store_true',
+                   help='不探活 serve，强制冷载 sidecar（对拍用）')
     g = ap.add_argument_group('输出')
     g.add_argument('--limit', type=int, help='最多列几条（缺省 20；--like 时由 --topk 管）')
     g.add_argument('--count', action='store_true', help='只报命中条数')
@@ -107,6 +120,13 @@ def main():
     g.add_argument('--sql', action='store_true', help='把生成的 SQL 与参数打出来（查询透明）')
     a = ap.parse_args()
 
+    # 🔴 互斥闸：两个锚点同时给 = 说不清按谁排，拒查不猜（argparse 的通用报错说不明白，这里自己说）
+    if a.like and a.like_qid:
+        sys.exit('🔴 --like 与 --like-qid 互斥：\n'
+                 '   --like 是自然语言描述（要现算一条查询向量），'
+                 '--like-qid 是以题找题（直取库里那道题的向量当锚）——\n'
+                 '   同时给等于两个锚点，按谁排都是猜。二选一。')
+
     p = Path(a.db)
     if not p.exists():
         sys.exit(f'🔴 库不存在：{p}（先跑 工具箱/库/init_db.py --only kb）')
@@ -114,8 +134,9 @@ def main():
     conn.execute('PRAGMA foreign_keys=ON')
     t0 = time.time()
     filters = build_filters(a)
-    action = 'find-like' if a.like else 'find'
-    digest = str(filters)[:180] + (f' like={a.like[:40]}' if a.like else '')
+    action = 'find-like' if a.like else ('find-like-qid' if a.like_qid else 'find')
+    digest = str(filters)[:180] + (f' like={a.like[:40]}' if a.like else '') + \
+        (f' like_qid={a.like_qid}' if a.like_qid else '')
 
     try:
         if a.sql:
@@ -134,23 +155,39 @@ def main():
             for note in meta.get('note') or []:
                 print(f'· {note}')
 
-        if a.like:
+        if a.like or a.like_qid:
             cand = find_ids(conn, filters, a.order)          # ①② 先过滤（不限量），③ 只在候选里排
             if a.limit:
-                print(f'⚠️ --like 时 --limit 不生效（条数由 --topk={a.topk} 管）', file=sys.stderr)
+                print(f'⚠️ --like/--like-qid 时 --limit 不生效（条数由 --topk={a.topk} 管）',
+                      file=sys.stderr)
             if not cand:
                 print(f'命中 0 条（①②层就空了，语意层没得排）')
                 _log(conn, action, digest, '成功', 'hits=0', t0)
                 return 0
-            hits, info = embed_tool.rank(conn, a.like, cand, a.topk, a.venv, a.model_dir)
+            if a.like_qid:
+                # 🔴 以题找题：锚向量库里现成的，不载模型不走 serve；锚题自己不进结果
+                hits, info = embed_tool.rank_by_qid(conn, a.like_qid, cand, a.topk)
+                anchor_row = conn.execute('SELECT blocks_json FROM question WHERE id=?',
+                                          (a.like_qid,)).fetchone()
+                head = (f'①②层命中 {n} 条 → ③以题找题（锚={a.like_qid}）排序取前 {{k}} '
+                        f'（模型 {info["model"]}，候选里 {info["vectored"]} 题有向量；锚题自身已排除）')
+                anchor_txt = (f'· 锚题：{a.like_qid}\t{first_text(anchor_row[0])}'
+                              if anchor_row else None)
+            else:
+                hits, info = embed_tool.rank(conn, a.like, cand, a.topk, a.venv, a.model_dir,
+                                             serve_port=a.serve_port, use_serve=not a.no_serve)
+                head = (f'①②层命中 {n} 条 → ③语意「{a.like}」排序取前 {{k}} '
+                        f'（模型 {info["model"]}，候选里 {info["vectored"]} 题有向量）')
+                anchor_txt = None
             rows = rows_by_ids(conn, [q for q, _ in hits])
             score = dict(hits)
             if a.ids_only:
                 for r in rows:
                     print(r['id'])
             else:
-                print(f'①②层命中 {n} 条 → ③语意「{a.like}」排序取前 {len(rows)} '
-                      f'（模型 {info["model"]}，候选里 {info["vectored"]} 题有向量）')
+                if anchor_txt:
+                    print(anchor_txt)
+                print(head.format(k=len(rows)))
                 if info['missing']:
                     print(f'⚠️ 候选里有 {info["missing"]} 题还没算向量，排不进来——'
                           f'补：python 工具箱/检索/embed_tool.py build')

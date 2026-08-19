@@ -159,13 +159,24 @@ def fill(it, i, ans, ctx=None):
 
 
 def choice(it, i, ans, ctx=None):
-    """选择题（2026-08-20 补实装——讲义快录后打通「出」通路）。
-    契约：it['text'] = 渲好的题面 HTML（题干+选项行，可含 \\(...\\)）；
-          it['ans']  = 渲好的答案 HTML，**可空**（无答案态出练习卷合法）。
-    题目卷=题干+选项行；答案卷=题号+答案（不重复题面，省纸口径同 word）；
-    无答案时答案卷如实印「（待补答案）」——绝不静默漏题号。"""
+    """选择题（2026-08-20 实装；同日按用户卷面口径改**列位制**）。
+    契约：it['text']     = 渲好的题干 HTML（不含选项）；
+          it['options']  = [{'label':'A','html':…}]，每选项**独立占位**；
+          it['opt_cols'] = 4/2/1（一行几个选项，适配层按最长选项定）；
+          it['ans']      = 渲好的答案 HTML，**可空**（无答案态出练习卷合法）。
+    排版=正常试卷的列位：等宽 inline-block 网格，选项各占其位不流式黏连
+    （布局思路采纳备课帮展示效果）。答案卷=题号+答案（不重复题面，省纸口径同 word）；
+    无答案时答案卷如实印「（待补答案）」——绝不静默漏题号。
+    🔴 图选项/配图带说明文字：本版拒渲（适配层拦），占位设计已留（figure 通路批次⑥接）。"""
     if not ans:
-        return '<div class="app">%s%s</div>' % (_qn(i, ans, word=True), glue(it['text']))
+        cols = it.get('opt_cols') or 4
+        w = {4: '24%', 2: '49%', 1: '98%'}[cols]
+        cells = ''.join(
+            '<span style="display:inline-block;width:%s;vertical-align:top;'
+            'margin:2pt 0">%s．%s</span>' % (w, o['label'], glue(o['html']))
+            for o in (it.get('options') or []))
+        return ('<div class="app">%s%s<div style="padding-left:1.2em">%s</div></div>'
+                % (_qn(i, ans, word=True), glue(it['text']), cells))
     return '<div class="ln">%s%s</div>' % (_qn(i, ans),
                                            glue(it.get('ans') or '（待补答案）'))
 

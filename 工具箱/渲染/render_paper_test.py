@@ -146,7 +146,20 @@ def unit_choice():
         ok('option 内嵌 figure 拒渲', True)
     it = {'question': {'blocks': blocks, 'answer_blocks': None, 'analysis_blocks': None}}
     d = RP.adapt_item(it, 'choice', 'T')
-    ok('choice 槽·无答案态合法', d['ans'] == '' and 'A．' in d['text'] and d['_src'] == '无答案态')
+    ok('choice 槽·选项独立占位不进题干', d['ans'] == '' and d['_src'] == '无答案态'
+       and 'A．' not in d['text'] and len(d['options']) == 4
+       and d['options'][0]['label'] == 'A', repr(d))
+    ok('choice 槽·短选项 4 列', d['opt_cols'] == 4, repr(d.get('opt_cols')))
+    mid = {'v': 2, 'rows': [{'cells': [opt(l, '零上 $%d^\\circ C$ 左右幅度' % n)
+                                       for l, n in (('A', 3), ('B', 5), ('C', 7), ('D', 9))]}]}
+    dm = RP.adapt_item({'question': {'blocks': mid, 'answer_blocks': None,
+                                     'analysis_blocks': None}}, 'choice', 'T')
+    ok('choice 槽·中长选项 2 列', dm['opt_cols'] == 2, repr(dm.get('opt_cols')))
+    lng = {'v': 2, 'rows': [{'cells': [opt(l, '这是一个非常长的文字选项内容用于测试单列排布行为' )
+                                       for l in 'ABCD']}]}
+    dl = RP.adapt_item({'question': {'blocks': lng, 'answer_blocks': None,
+                                     'analysis_blocks': None}}, 'choice', 'T')
+    ok('choice 槽·长选项 1 列', dl['opt_cols'] == 1, repr(dl.get('opt_cols')))
     it2 = {'question': {'blocks': blocks, 'analysis_blocks': None,
                         'answer_blocks': {'v': 2, 'rows': [{'cells': [
                             {'type': 'text', 'role': '答案', 'md': 'A'}]}]}}}

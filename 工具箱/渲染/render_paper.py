@@ -232,6 +232,13 @@ class Tex(object):
         return 'Tex(%r)' % self.h
 
 
+def _plain_len(md):
+    """选项的**视觉宽度估算**（定列数用）：剥 $ 定界与 LaTeX 命令壳，中文按 2 计。"""
+    s = re.sub(r'\\[a-zA-Z]+', 'x', md or '')          # \frac \degree → 单字符占位
+    s = re.sub(r'[${}^_\\]', '', s)
+    return sum(2 if ord(ch) > 0x2E80 else 1 for ch in s)
+
+
 def _nospace(s):
     return re.sub(r'\s+', '', s or '')
 
@@ -351,11 +358,41 @@ def adapt_item(item, slot, where='?'):
                 'ans': ans_html, '_src': '答案首行'}
 
     if slot == 'choice':
-        # 选择题（2026-08-20 补实装）：题面=题干+选项行（md_lines 已把 option 行拼好）；
+        # 选择题（2026-08-20 补实装；同日按用户卷面口径改列位制）：
+        # 🔴 选项不做流式拼接 —— 每个选项独立占位，按最长选项宽度定列数（4/2/1 列），
+        #    正常试卷的排法（参照备课帮展示效果采纳布局思路）。
         # 🔴 答案可空 —— 无答案态（如讲义题目版）出练习卷合法，答案卷印「（待补答案）」。
+        stem_html, options = [], []
+        if isinstance(stem_blocks, str):
+            stem_blocks_d = json.loads(stem_blocks)
+        else:
+            stem_blocks_d = stem_blocks
+        for r, row in enumerate(stem_blocks_d.get('rows') or []):
+            cells = row.get('cells') or []
+            if any(c.get('type') == 'option' for c in cells):
+                for cell in cells:
+                    label = (cell.get('label') or '').strip()
+                    inner = ' '.join(
+                        ' '.join(ln.strip() for ln in (b.get('md') or '').split('\n') if ln.strip())
+                        for b in (cell.get('blocks') or []) if b.get('type') == 'text')
+                    options.append({'label': label,
+                                    'html': md_to_delim(inner, '%s.选项%s' % (where, label)),
+                                    '_len': _plain_len(inner)})
+            else:
+                for cell in cells:
+                    if cell.get('type') == 'text':
+                        for ln in (cell.get('md') or '').split('\n'):
+                            if ln.strip():
+                                stem_html.append(md_to_delim(ln.strip(), where + '.题面'))
+        if not options:
+            raise PackError('[%s] choice 槽但题面无 option 块 —— 选择题包坏形' % where)
+        longest = max(o['_len'] for o in options)
+        opt_cols = 4 if longest <= 10 else (2 if longest <= 26 else 1)
+        for o in options:
+            o.pop('_len', None)
         raw = md_lines(ans_blocks, where + '.答案')
         ansline = '；'.join(md_to_delim(x, where + '.答案') for x in raw) if raw else ''
-        return {'text': '<br>'.join(md_to_delim(x, where + '.题面') for x in stem_ls),
+        return {'text': '<br>'.join(stem_html), 'options': options, 'opt_cols': opt_cols,
                 'ans': ansline, '_src': '答案' if raw else '无答案态'}
 
     raise PackError('[%s] 槽位 %r 本版未实装（已实装：expr / oral / word / fill / choice）' % (where, slot))

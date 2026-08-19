@@ -160,6 +160,18 @@ def unit():
     d = RP.adapt_item(it, 'fill', 'T')
     ok('fill 槽位：题面转定界 + 答案着色',
        d['text'] == '括号里填几：\\(3+\\square=8\\)' and '\\color{' in d['ans'])
+    # ── 2026-08-20 答案卷三缺口回归 ──
+    it_noans = {'question': {'blocks': B('$1-2=$（　）'), 'answer_blocks': None}}
+    dn = RP.adapt_item(it_noans, 'fill', 'T')
+    ok('🔴 fill 无答案态如实印「（待补答案）」不静默',
+       dn['ans'] == '（待补答案）' and dn['_src'] == '无答案态', repr(dn))
+    multi = {'v': 2, 'rows': [{'cells': [{'type': 'text', 'role': '答案', 'md': '$-3$'}]},
+                              {'cells': [{'type': 'text', 'role': '答案', 'md': '$5$'}]}]}
+    dm2 = RP.adapt_item({'question': {'blocks': B('两空：①（　）②（　）'),
+                                      'answer_blocks': multi}}, 'fill', 'T')
+    ok('🔴 fill 多行答案全印（此前静默丢第二行起）',
+       dm2['ans'].count('\\color{') == 2 and '<br>' in dm2['ans']
+       and dm2['_src'] == '答案2行', repr(dm2['ans']))
     it2 = {'question': {'blocks': B('$36\\div 4$'), 'answer_blocks': B('$9$')}}
     d2 = RP.adapt_item(it2, 'oral', 'T')
     ok('oral 槽位：stem + 末行答案', d2['stem'].h == '36\\div 4' and d2['lines'] == ['9'])
@@ -286,6 +298,15 @@ def unit_figure(root, db):
     dc = RP.adapt_item(ch, 'choice', 'T', A)
     ok('choice 槽·配图题干渲进题面（此前被静默丢）',
        '<img class="fig"' in dc['text'] and len(dc['options']) == 2, repr(dc['text'])[:120])
+    ch2 = {'question': {'blocks': {'v': 2, 'rows': [
+        {'cells': [{'type': 'text', 'md': '选（　）'}]},
+        {'cells': [opt('A', 'x'), opt('B', 'y')]}]},
+        'answer_blocks': {'v': 2, 'rows': [{'cells': [{'type': 'text', 'md': 'B'}]},
+                                           {'cells': [cell(w='30%')]}]},
+        'analysis_blocks': None}}
+    dc2 = RP.adapt_item(ch2, 'choice', 'T', A)
+    ok('🔴 choice 槽·答案带图不误拒（2026-08-20 修：答案漏传 assets）',
+       'B' in dc2['ans'] and '<img class="fig"' in dc2['ans'], repr(dc2['ans'])[:120])
 
 
 def unit_table(root, db):

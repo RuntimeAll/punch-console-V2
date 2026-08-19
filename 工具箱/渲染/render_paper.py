@@ -694,21 +694,29 @@ def adapt_item(item, slot, where='?', assets=None):
 
     if slot == 'fill':
         raw = md_lines(ans_blocks, where + '.答案', assets)
-        ans_html = ''
         if raw:
-            t = pure_formula(raw[0], where + '.答案')
-            # 纯公式 → 着色进公式内部（MathJax 不吃外层 CSS）；混排 → 走 ansv 类 + 内联色，
-            # ansv 已在 core.ANSWER_ONLY_MARKS 里，泄答案闸照样能盯住。
-            ans_html = ('\\(%s\\)' % ('\\color{%s}{%s}' % (renderers.get('math').ANSWER_COLOR, t))
-                        if t is not None else
-                        '<span class="ansv" style="color:%s">%s</span>'
-                        % (renderers.get('math').ANSWER_COLOR,
-                           md_to_delim(raw[0], where + '.答案')))
+            # 🔴 多行答案（多空填空/解答分步）**全要**（2026-08-20 修）：此前只取 raw[0]，
+            #    第二个空起的答案被静默丢——答案卷印出来像全对，实则缺答案。
+            parts = []
+            for ln in raw:
+                t = pure_formula(ln, where + '.答案')
+                # 纯公式 → 着色进公式内部（MathJax 不吃外层 CSS）；混排 → 走 ansv 类 + 内联色，
+                # ansv 已在 core.ANSWER_ONLY_MARKS 里，泄答案闸照样能盯住。
+                parts.append('\\(%s\\)' % ('\\color{%s}{%s}' % (renderers.get('math').ANSWER_COLOR, t))
+                             if t is not None else
+                             '<span class="ansv" style="color:%s">%s</span>'
+                             % (renderers.get('math').ANSWER_COLOR,
+                                md_to_delim(ln, where + '.答案')))
+            ans_html, src = '<br>'.join(parts), '答案%d行' % len(raw)
+        else:
+            # 🔴 无答案态如实印（2026-08-20 修）：此前空串静默——填空题答案卷看不出这题没答案；
+            #    与 choice 槽同口径，绝不静默漏题。
+            ans_html, src = '（待补答案）', '无答案态'
         # 🔴 fill 是**唯一在答案卷重印题面**的槽（renderers/math.py fill），
         #    所以只有它需要一份剥了图的题面：text_ans（省纸口径不破）。
         return {'text': '<br>'.join(md_to_delim(x, where + '.题面') for x in stem_ls),
                 'text_ans': '<br>'.join(stem_for_answer(stem_ls, where + '.题面')),
-                'ans': ans_html, '_src': '答案首行'}
+                'ans': ans_html, '_src': src}
 
     if slot == 'choice':
         # 选择题（2026-08-20 补实装；同日按用户卷面口径改列位制）：
@@ -757,7 +765,8 @@ def adapt_item(item, slot, where='?', assets=None):
         opt_cols = 4 if longest <= 10 else (2 if longest <= 26 else 1)
         for o in options:
             o.pop('_len', None)
-        raw = md_lines(ans_blocks, where + '.答案')
+        # 🔴 答案也传 assets（2026-08-20 修）：此前漏传，答案里带 figure 会被误判「没给 assets」拒渲
+        raw = md_lines(ans_blocks, where + '.答案', assets)
         ansline = '；'.join(md_to_delim(x, where + '.答案') for x in raw) if raw else ''
         return {'text': '<br>'.join(stem_html), 'options': options, 'opt_cols': opt_cols,
                 'ans': ansline, '_src': '答案' if raw else '无答案态'}

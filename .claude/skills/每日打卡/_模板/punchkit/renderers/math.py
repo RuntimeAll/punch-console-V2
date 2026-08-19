@@ -169,14 +169,23 @@ def choice(it, i, ans, ctx=None):
     无答案时答案卷如实印「（待补答案）」——绝不静默漏题号。
     🔴 图选项/配图带说明文字：本版拒渲（适配层拦），占位设计已留（figure 通路批次⑥接）。"""
     if not ans:
+        # 🔴 选项网格用 <table>（2026-08-20 用户打回二修：inline-block 换行后列起点漂移，
+        #    C/D 行与 A/B 行对不齐——表格单元格定列宽，跨行绝对对齐）。
         cols = it.get('opt_cols') or 4
-        w = {4: '24%', 2: '49%', 1: '98%'}[cols]
-        cells = ''.join(
-            '<span style="display:inline-block;width:%s;vertical-align:top;'
-            'margin:2pt 0">%s．%s</span>' % (w, o['label'], glue(o['html']))
-            for o in (it.get('options') or []))
-        return ('<div class="app">%s%s<div style="padding-left:1.2em">%s</div></div>'
-                % (_qn(i, ans, word=True), glue(it['text']), cells))
+        opts = it.get('options') or []
+        w = '%.1f%%' % (100.0 / cols)
+        rows_html = []
+        for r0 in range(0, len(opts), cols):
+            tds = ''.join(
+                '<td style="width:%s;vertical-align:top;padding:1pt 0">%s．%s</td>'
+                % (w, o['label'], glue(o['html'])) for o in opts[r0:r0 + cols])
+            # 末行补空格子，保住列宽（否则单格行会被撑满）
+            tds += '<td style="width:%s"></td>' % w * (cols - len(opts[r0:r0 + cols]))
+            rows_html.append('<tr>%s</tr>' % tds)
+        table = ('<table style="width:100%%;border-collapse:collapse;table-layout:fixed;'
+                 'margin:2pt 0 0 1.2em">%s</table>' % ''.join(rows_html))
+        return ('<div class="app">%s%s%s</div>'
+                % (_qn(i, ans, word=True), glue(it['text']), table))
     return '<div class="ln">%s%s</div>' % (_qn(i, ans),
                                            glue(it.get('ans') or '（待补答案）'))
 

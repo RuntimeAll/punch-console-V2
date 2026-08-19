@@ -323,12 +323,18 @@ def open_kb(path):
     return conn
 
 
-def load_rows(punch):
+def load_rows(punch, only_docs=None):
+    """only_docs：试刀用的源册白名单（punch doc id 集合）。🔴 给了它就是部分跑，
+    报告一律走 .partial 通道不碰正本——保护逻辑与 --limit 同一条（emit 的 partial 标记）。"""
+    extra = ''
+    if only_docs:
+        extra = f'AND doc_id IN ({",".join(str(int(x)) for x in only_docs)}) '
     sql = (
         'SELECT id, doc_id, day, section, seq, stem, answer, steps, 考点, 题型, 难度, 来源, 实算 '
         'FROM question '
         "WHERE answer IS NOT NULL AND TRIM(answer)<>'' "
         f'AND doc_id NOT IN ({",".join(str(x) for x in EXCLUDE_DOCS)}) '
+        + extra +
         'ORDER BY id'
     )
     return [dict(r) for r in punch.execute(sql)]
@@ -436,9 +442,18 @@ def run(args):
     t0 = time.time()
     punch = open_punch(args.punch)
     kb = open_kb(args.kb)
-    rows = load_rows(punch)
+    only_docs = None
+    if getattr(args, 'only_doc', None):
+        only_docs = [int(x) for x in str(args.only_doc).split(',') if x.strip()]
+    rows = load_rows(punch, only_docs)
     if args.limit:
         rows = rows[:args.limit]
+    # 部分跑标记（--limit / --only-doc 任一即部分跑）：报告走 .partial 不碰正本
+    part_tag = None
+    if args.limit:
+        part_tag = f'--limit {args.limit}'
+    if only_docs:
+        part_tag = (part_tag + ' ' if part_tag else '') + f'--only-doc {args.only_doc}'
 
     # ── survey 模式：只统计块形，供核对/改规则表 ──────────────────────
     if args.survey:
@@ -513,7 +528,7 @@ def run(args):
 
     # ── 出四份件（dry-run 也出，账先给人看）────────────────────────────
     # 🔴 --limit 是部分跑：四份件一律改写 <正本名>.partial.md，正本一个都不覆盖
-    written = write_reports(punch, bucket_rule, bucket_kp, resolver, docs, args.limit)
+    written = write_reports(punch, bucket_rule, bucket_kp, resolver, docs, part_tag)
 
     stats = {'新建': 0, '复用既有题': 0, '已映射跳过': already, '闸拒收': 0}
     rejects = []
@@ -575,9 +590,9 @@ def run(args):
             print(f'  ✗ punch#{r["id"]} doc={r["doc_id"]} {errs[0]}')
         if len(rejects) > 20:
             print(f'  …另有 {len(rejects) - 20} 条')
-        written.append(write_rejects(rejects, args.limit))
+        written.append(write_rejects(rejects, part_tag))
     print(f'📄 本次写/覆盖报告件 {len(written)} 份'
-          + ('（--limit 部分跑：只写 .partial.md，正本一个都没动）' if args.limit else '（全量跑：写正本）')
+          + (f'（{part_tag} 部分跑：只写 .partial.md，正本一个都没动）' if part_tag else '（全量跑：写正本）')
           + '：')
     for p in written:
         print(f'    · {p}')
@@ -594,7 +609,7 @@ def run(args):
     return {'total': total, '待入规则': len(bucket_rule), '待入考点': len(bucket_kp),
             '应吃': len(plan), '考点命中名': len(kp_hit), '考点未命中名': len(kp_miss),
             'stats': stats, 'rejects': len(rejects),
-            'reports': [str(p) for p in written], 'partial': bool(args.limit),
+            'reports': [str(p) for p in written], 'partial': bool(part_tag),
             'code': 0 if not rejects else 1}
 
 
@@ -628,10 +643,10 @@ def emit(base, title, lines, limit):
         head = []
     else:
         path = base.with_name(base.stem + '.partial' + base.suffix)
-        head = [f'# 🔴🔴 部分跑 limit={limit}，非完整口径 🔴🔴', '',
-                f'> **这不是交付件**：本件由 `--limit {limit}` 生成，只看了源库前 {limit} 题，'
-                f'下面每一个计数、每一张聚合表都只是这 {limit} 题的口径。',
-                f'> 全量正本是同目录的 `{base.name}`（只有不带 `--limit` 的全量跑才会写它，本次没动它）。', '']
+        head = [f'# 🔴🔴 部分跑（{limit}），非完整口径 🔴🔴', '',
+                f'> **这不是交付件**：本件由部分跑参数 `{limit}` 生成，只看了源库的一个子集，'
+                f'下面每一个计数、每一张聚合表都只是该子集的口径。',
+                f'> 全量正本是同目录的 `{base.name}`（只有全量跑才会写它，本次没动它）。', '']
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('\n'.join(head + _hdr(title, lines)) + '\n', encoding='utf-8')
     return path
@@ -996,6 +1011,8 @@ def main():
     ap.add_argument('--apply', action='store_true', help='真写库（缺省=dry-run，跑完回滚）')
     ap.add_argument('--survey', action='store_true', help='只统计块形分布，供核对/改 RULE_TABLE')
     ap.add_argument('--limit', type=int, help='只处理前 N 题（调试用）')
+    ap.add_argument('--only-doc', dest='only_doc',
+                    help='只吃这些源册（punch doc id，逗号分隔）——试刀用；部分跑，报告走 .partial 不碰正本')
     args = ap.parse_args()
     sys.exit(run(args)['code'])
 

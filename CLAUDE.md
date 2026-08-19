@@ -75,6 +75,7 @@ cd D:\workplace\ai-bkb-v2\console; pnpm exec vite --port 4300 --strictPort --hos
 # 🔴 必须显式 --host 127.0.0.1（默认只绑 ::1 连不上）；build 自证 = pnpm build（tsc -b && vite build）
 # 探活（本机有代理必须 --noproxy）
 curl.exe -s -o NUL -w "%{http_code}" --noproxy "*" http://127.0.0.1:4300/
+# 读 API + 语意 serve（常驻一对，启动台幂等管）：python 工具箱\启动台.py（--status 只探活 / --stop 全停）
 # （punch-console :3000 已冻结待退役——PRD-003 并入 v2，不再起服务；资料库.db 只读存档）
 # Chrome 截图/出 PDF（撞正开着的 Chrome 会静默不写文件）
 # --headless=new --disable-gpu --no-proxy-server --user-data-dir=<临时profile>，截完 sleep 再验文件存在

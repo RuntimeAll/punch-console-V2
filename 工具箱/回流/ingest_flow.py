@@ -78,7 +78,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '库'))
 from gates import (execution_valve, assert_leaf_kp, assert_promotable,  # noqa: E402
-                   LeafKpError, GateError)
+                   LeafKpError, GateError, validate_blocks, SECOND_CARRIERS)
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / '知识库' / 'kb.db'
@@ -602,6 +602,78 @@ def cmd_ticket_done(conn, args):
     return f'id={tid}', f'{new_status} ref={ref} left={left}', 0
 
 
+# ── patch-answer：答案补齐回写（2026-08-20 五步战役令窗B建）───────────────
+def cmd_patch_answer(conn, args, dry=False):
+    """给已入库题回写 answer_blocks（可带 analysis_blocks）。此前 answer_blocks 只有
+    INSERT 通路没有回写通路——答案补齐批（先无答案态入库、事后集中解题）需要这条。
+
+    口径：🔴 只补空不覆盖——已有答案的题必须 --force 显式放行（同 ingest 对已存在 id 的口径）；
+    闸=validate_blocks(is_stem=False)+第二载体拒收（与执行阀闸③同一份 SECOND_CARRIERS）；
+    缺省全或无，--partial 放行过闸子集；confidence<90 的题如实列出待人审，绝不静默。
+
+    答案包格式：{"items":[{"id":"q…","answer_blocks":{v2块流},"analysis_blocks":{可选},
+                  "confidence":95,"note":"实算闸=sympy恒等"}]}
+    """
+    pack = json.loads(Path(args.pack).read_text(encoding='utf-8'))
+    items = pack.get('items') or []
+    if not items:
+        sys.exit('🔴 答案包 items 为空')
+    ok_n, errs, low_conf = 0, [], []
+    conn.execute('BEGIN')
+    for i, item in enumerate(items):
+        qid = item.get('id')
+        where = f'items[{i}] id={qid}'
+        if not qid:
+            errs.append(f'items[{i}] 缺 id')
+            continue
+        dirty = [k for k in SECOND_CARRIERS if item.get(k) not in (None, '', [], {})]
+        if dirty:
+            errs.append(f'{where} 检出第二载体字段 {dirty}——答案只有 answer_blocks 一份')
+            continue
+        row = conn.execute('SELECT answer_blocks_json FROM question WHERE id=?', (qid,)).fetchone()
+        if not row:
+            errs.append(f'{where} 不存在')
+            continue
+        if row[0] and not getattr(args, 'force', False):
+            errs.append(f'{where} 已有答案——不静默覆盖（--force 显式放行）')
+            continue
+        ans = item.get('answer_blocks')
+        if not ans:
+            errs.append(f'{where} 缺 answer_blocks')
+            continue
+        ok_b, es = validate_blocks(ans, is_stem=False)
+        if not ok_b:
+            errs.append(f'{where} 答案闸拒收：' + '；'.join(es))
+            continue
+        ana = item.get('analysis_blocks')
+        if ana:
+            ok_a, es_a = validate_blocks(ana, is_stem=False)
+            if not ok_a:
+                errs.append(f'{where} 解析闸拒收：' + '；'.join(es_a))
+                continue
+        conn.execute(
+            'UPDATE question SET answer_blocks_json=?, '
+            'analysis_blocks_json=COALESCE(?, analysis_blocks_json), updated_at=? WHERE id=?',
+            (json.dumps(ans, ensure_ascii=False),
+             json.dumps(ana, ensure_ascii=False) if ana else None, now(), qid))
+        if (item.get('confidence') or 100) < 90:
+            low_conf.append(qid)
+        ok_n += 1
+    rolled = dry or bool(errs and not args.partial)
+    if rolled:
+        conn.rollback()
+    else:
+        conn.commit()
+    tag = '干跑' if dry else ('部分入' if errs and args.partial else '全入')
+    print(f'patch-answer[{tag}]：{ok_n}/{len(items)} 过闸回写' + ('（已回滚未写库）' if rolled else ''))
+    if low_conf:
+        print(f'⚠ 低置信（<90）待人审 {len(low_conf)} 题：' + ' '.join(low_conf))
+    for e in errs:
+        print('  ✗', e)
+    return (f'{len(items)}题', f'ok={ok_n} err={len(errs)} low={len(low_conf)} rolled={int(rolled)}',
+            0 if not errs else 1)
+
+
 def main():
     ap = argparse.ArgumentParser(description='自产题回流入库轻通路（过三闸才算出完）')
     ap.add_argument('--db', default=str(DEFAULT_DB))
@@ -618,6 +690,11 @@ def main():
                             '算不动只打印待补命令，不阻断入库）')
         s.add_argument('--serve-port', dest='serve_port', type=int,
                        help='常驻 embed serve 端口（缺省 4315／环境变量 EMBED_SERVE_PORT）')
+    for name in ('patch-answer', 'patch-check'):
+        s = sub.add_parser(name, help='答案补齐回写（patch-check=干跑不写库）')
+        s.add_argument('pack')
+        s.add_argument('--partial', action='store_true', help='过闸的写、拒收的列清单（默认全或无）')
+        s.add_argument('--force', action='store_true', help='已有答案也覆盖（缺省不静默覆盖）')
     s = sub.add_parser('promote')
     s.add_argument('--ids'); s.add_argument('--match')
     s = sub.add_parser('tickets')
@@ -635,6 +712,10 @@ def main():
             digest, detail, code = cmd_ingest(conn, args, dry=False)
         elif args.cmd == 'check':
             digest, detail, code = cmd_ingest(conn, args, dry=True)
+        elif args.cmd == 'patch-answer':
+            digest, detail, code = cmd_patch_answer(conn, args, dry=False)
+        elif args.cmd == 'patch-check':
+            digest, detail, code = cmd_patch_answer(conn, args, dry=True)
         elif args.cmd == 'tickets':
             digest, detail, code = cmd_tickets(conn, args)
         elif args.cmd == 'ticket-done':

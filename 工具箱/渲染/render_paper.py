@@ -181,8 +181,14 @@ def md_lines(blocks, where='?'):
             pieces = []
             for c, cell in enumerate(cells):
                 tag = '%s.row%d.cell%d' % (where, r + 1, c + 1)
+                if cell.get('type') == 'text':
+                    # 🔴 题干与选项同 row 是入库闸认的合法形（快录包实存）——text 当题干行，不拒
+                    for ln in (cell.get('md') or '').split('\n'):
+                        if ln.strip():
+                            out.append(ln.strip())
+                    continue
                 if cell.get('type') != 'option':
-                    raise PackError('[%s] option 行里混入 %r 块 —— 选项行必须整行都是 option'
+                    raise PackError('[%s] option 行里混入 %r 块 —— 只认 text（题干）与 option'
                                     % (tag, cell.get('type')))
                 label = (cell.get('label') or '').strip()
                 if not label:
@@ -371,6 +377,12 @@ def adapt_item(item, slot, where='?'):
             cells = row.get('cells') or []
             if any(c.get('type') == 'option' for c in cells):
                 for cell in cells:
+                    if cell.get('type') == 'text':
+                        # 题干与选项同 row 的合法变形：text 归题干
+                        for ln in (cell.get('md') or '').split('\n'):
+                            if ln.strip():
+                                stem_html.append(md_to_delim(ln.strip(), where + '.题面'))
+                        continue
                     label = (cell.get('label') or '').strip()
                     inner = ' '.join(
                         ' '.join(ln.strip() for ln in (b.get('md') or '').split('\n') if ln.strip())

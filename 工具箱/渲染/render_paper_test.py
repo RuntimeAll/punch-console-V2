@@ -132,12 +132,15 @@ def unit_choice():
     long_blocks = {'v': 2, 'rows': [{'cells': [
         opt('A', '零上' * 12), opt('B', '零下' * 12), opt('C', 'x' * 24), opt('D', 'y' * 24)]}]}
     ok('超长选项自动折行（两选项一行）', len(RP.md_lines(long_blocks, 'T')) == 2)
+    mixed = RP.md_lines({'v': 2, 'rows': [{'cells': [
+        {'type': 'text', 'role': '题面', 'md': '题干（　）'}, opt('A', 'x'), opt('B', 'y')]}]}, 'T')
+    ok('题干与选项同 row 合法（text 归题干）', mixed[0] == '题干（　）' and mixed[1].startswith('A．'), repr(mixed))
     try:
         RP.md_lines({'v': 2, 'rows': [{'cells': [
-            opt('A', 'x'), {'type': 'text', 'role': '题面', 'md': '混入'}]}]}, 'T')
-        ok('option 行混入 text 拒渲', False, '没抛错')
+            opt('A', 'x'), {'type': 'table', 'md': ''}]}]}, 'T')
+        ok('option 行混入 table 拒渲', False, '没抛错')
     except RP.PackError:
-        ok('option 行混入 text 拒渲', True)
+        ok('option 行混入 table 拒渲', True)
     try:
         RP.md_lines({'v': 2, 'rows': [{'cells': [{'type': 'option', 'label': 'A',
             'blocks': [{'type': 'figure', 'ref': 'x'}]}]}]}, 'T')

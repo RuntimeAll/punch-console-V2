@@ -22,3 +22,6 @@ Thumbs.db
 
 # punch-console = 独立 git 仓（origin=RuntimeAll/punch-console.git），不并入 v2 仓
 /punch-console/
+
+# playwright MCP 临时产物
+.playwright-mcp/

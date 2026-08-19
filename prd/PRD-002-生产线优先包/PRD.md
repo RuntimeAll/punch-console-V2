@@ -92,3 +92,14 @@
     （题库 60 题公式真渲/资料册 1 册 1 卷 12 题；:4300 已重启带 /api/kb 代理，:4310 读 API 常驻）；
     修 Chrome 相对路径废 URL 实伤一处（core+render_paper 同修）。
     待用户点头 → 组 D2~D5 → 全册双 PDF → finalize（promote+定稿+覆盖考点回填）→ 网盘 → 挂账/物料
+- [ ] 11 🔴 **知识库坚实批**（2026-08-19 用户三条拍板：①实弹册不再上网盘/发布（网盘与 V1 已有，不重复录入）
+  ②计算题入库=DSL 批处理规律入库零 LLM（打标注册表下沉 DSL 本体，一条命令排班→入库→组卷，
+  消灭每册手写编排脚本的损耗）③知识库先坚实、每日打卡与举一反三**挂起**，确认后再走）：
+  - [x] 11a 语意层地基：question_vec DDL 主位执行 + D-20 落地口径进正本（本地 bge sidecar 零外部 API，
+    venv 已建 工具箱/检索/.venv，模型复用 punch-console/embed/models 184M）+ 闸④ promote 前置闸进 gates
+  - [ ] 11b DSL 批处理入库 dsl_batch（GEN_META 注册表下沉 qbank；排班.json→生成→verify→规律打标→
+    批量入库→组卷 spec/--assemble 一条命令；exam_model 缺档整体拒跑）
+  - [ ] 11c 入库闸补全：D-21 等级审矩阵实装（复杂度×源机械判级，L0/L1 直入、L2/L3 自动开 review_ticket，
+    promote 接闸④先审后上架）+ 工单原语 tickets/ticket-done
+  - [ ] 11d 取用方式：D-20 三层（query_core 确定性查询核②八维倒排+①精确过滤；find_questions CLI；
+    paper_tool.take 复用同核；读 API 扩参；③语意=embed_tool build/query 本地 bge sidecar）

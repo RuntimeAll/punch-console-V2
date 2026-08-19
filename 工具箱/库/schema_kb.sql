@@ -400,3 +400,16 @@ CREATE TABLE IF NOT EXISTS paper_item (
   PRIMARY KEY (paper_id, ord)
 );
 CREATE INDEX IF NOT EXISTS ix_paper_item_question ON paper_item(question_id);
+
+-- ---------------------------------------------------------------------
+-- question_vec —— 题面语意向量（D-20 第③层落地 · 2026-08-19）
+-- 通道=本地 bge-small-zh-v1.5 sidecar（punch-console/embed/models 权重复用，
+-- venv 在 工具箱/检索/.venv）；量级内现算余弦，不引向量库。
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS question_vec (
+  question_id TEXT PRIMARY KEY REFERENCES question(id),
+  model       TEXT NOT NULL,               -- 算向量用的模型名（换模型=重算，不混存）
+  dim         INTEGER NOT NULL,
+  vec         BLOB NOT NULL,               -- float32 小端连续
+  updated_at  TEXT
+);

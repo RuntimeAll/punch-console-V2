@@ -27,3 +27,5 @@
 **不是 skill 但会落 skill_log 的工具**（库中心产线的公共中段，由 9/10 两线共用，不单独挂号）：
 `工具箱/组卷/paper_tool.py`（skill_log.skill='组卷'）——paper/paper_item 唯一写入通路，
 assemble 从库取题组册 / render-pack 导 render-pack/v1 / finalize 定稿+promote / list / show。
+
+- **试卷处理管线**（2026-08-20 新编）：试卷 PDF/图片 → 结构化格式件（轻结构化不入库）；接力口①ingest 包入库 ②按讲义出平行卷。产物落 测试数据/试卷/。

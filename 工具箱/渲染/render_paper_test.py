@@ -118,6 +118,42 @@ def unit():
 
 
 # ══════════════ 二、正例出件 ══════════════
+def unit_choice():
+    """option 块与 choice 槽（2026-08-20 补实装的「出」通路）——摘掉实装必红。"""
+    print('\n── option/choice 单测 ──')
+    opt = lambda lb, md: {'type': 'option', 'label': lb,
+                          'blocks': [{'type': 'text', 'role': '题面', 'md': md}]}
+    blocks = {'v': 2, 'rows': [
+        {'cells': [{'type': 'text', 'role': '题面', 'md': '下列各数为负数的是（　）'}]},
+        {'cells': [opt('A', '$-2$'), opt('B', '$0$'), opt('C', '$3$'), opt('D', '$5$')]}]}
+    lines = RP.md_lines(blocks, 'T')
+    ok('option 行拼成卷面样式一行', len(lines) == 2 and lines[1].startswith('A．')
+       and 'D．' in lines[1], repr(lines))
+    long_blocks = {'v': 2, 'rows': [{'cells': [
+        opt('A', '零上' * 12), opt('B', '零下' * 12), opt('C', 'x' * 24), opt('D', 'y' * 24)]}]}
+    ok('超长选项自动折行（两选项一行）', len(RP.md_lines(long_blocks, 'T')) == 2)
+    try:
+        RP.md_lines({'v': 2, 'rows': [{'cells': [
+            opt('A', 'x'), {'type': 'text', 'role': '题面', 'md': '混入'}]}]}, 'T')
+        ok('option 行混入 text 拒渲', False, '没抛错')
+    except RP.PackError:
+        ok('option 行混入 text 拒渲', True)
+    try:
+        RP.md_lines({'v': 2, 'rows': [{'cells': [{'type': 'option', 'label': 'A',
+            'blocks': [{'type': 'figure', 'ref': 'x'}]}]}]}, 'T')
+        ok('option 内嵌 figure 拒渲', False, '没抛错')
+    except RP.PackError:
+        ok('option 内嵌 figure 拒渲', True)
+    it = {'question': {'blocks': blocks, 'answer_blocks': None, 'analysis_blocks': None}}
+    d = RP.adapt_item(it, 'choice', 'T')
+    ok('choice 槽·无答案态合法', d['ans'] == '' and 'A．' in d['text'] and d['_src'] == '无答案态')
+    it2 = {'question': {'blocks': blocks, 'analysis_blocks': None,
+                        'answer_blocks': {'v': 2, 'rows': [{'cells': [
+                            {'type': 'text', 'role': '答案', 'md': 'A'}]}]}}}
+    d2 = RP.adapt_item(it2, 'choice', 'T')
+    ok('choice 槽·有答案带答案', d2['ans'] == 'A' and d2['_src'] == '答案')
+
+
 def positive(tmp):
     print('\n── 正例：样例 pack 出双 PDF ──')
     out = Path(tmp) / '全册'
@@ -168,6 +204,7 @@ def main():
     tmp = tempfile.mkdtemp(prefix='render_paper_test_')
     try:
         unit()
+        unit_choice()
         negative(tmp)
         positive(tmp)
     finally:

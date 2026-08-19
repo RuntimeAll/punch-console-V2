@@ -172,7 +172,35 @@ def md_lines(blocks, where='?'):
         raise PackError('[%s] blocks 版本 v=%r，本版只吃 v2（数据结构 §2.1②）' % (where, v))
     out = []
     for r, row in enumerate(blocks.get('rows') or []):
-        for c, cell in enumerate(row.get('cells') or []):
+        cells = row.get('cells') or []
+        # ── option 行级处理（2026-08-20 补实装：选择题「出」通路）──
+        # 同一 row 里的 option 是兄弟选项：拼成卷面样式一行「A. x　B. y　…」；
+        # 超长自动折行（>60 字符两选项一行，>120 一选项一行）。选项内只认 text 块，
+        # 嵌 figure/table 照旧拒渲不静默（图选项归 figure 通路批次⑥）。
+        if any(c.get('type') == 'option' for c in cells):
+            pieces = []
+            for c, cell in enumerate(cells):
+                tag = '%s.row%d.cell%d' % (where, r + 1, c + 1)
+                if cell.get('type') != 'option':
+                    raise PackError('[%s] option 行里混入 %r 块 —— 选项行必须整行都是 option'
+                                    % (tag, cell.get('type')))
+                label = (cell.get('label') or '').strip()
+                if not label:
+                    raise PackError('[%s] option 缺 label' % tag)
+                inner = []
+                for b in (cell.get('blocks') or []):
+                    if b.get('type') != 'text':
+                        raise PackError('[%s] option 内嵌 %r 块 —— 图/表选项本版拒渲不静默'
+                                        % (tag, b.get('type')))
+                    inner.append(' '.join(ln.strip() for ln in (b.get('md') or '').split('\n')
+                                          if ln.strip()))
+                pieces.append('%s．%s' % (label, ' '.join(x for x in inner if x)))
+            total = sum(len(p) for p in pieces)
+            per_line = len(pieces) if total <= 60 else (2 if total <= 120 else 1)
+            for i in range(0, len(pieces), per_line):
+                out.append(' '.join(pieces[i:i + per_line]))
+            continue
+        for c, cell in enumerate(cells):
             t = cell.get('type')
             tag = '%s.row%d.cell%d' % (where, r + 1, c + 1)
             if t == 'text':
@@ -182,8 +210,6 @@ def md_lines(blocks, where='?'):
             elif t in ('figure', 'image'):
                 raise PackError('[%s] 出现 figure 块 —— 🔴 figure 渲染待批次⑥，'
                                 '本版拒渲不静默丢' % tag)
-            elif t == 'option':
-                raise PackError('[%s] 出现 option 块 —— 选择题槽位本版未实装，拒渲' % tag)
             elif t == 'table':
                 raise PackError('[%s] 出现 table 块 —— 表格渲染本版未实装，拒渲' % tag)
             else:
@@ -324,7 +350,15 @@ def adapt_item(item, slot, where='?'):
         return {'text': '<br>'.join(md_to_delim(x, where + '.题面') for x in stem_ls),
                 'ans': ans_html, '_src': '答案首行'}
 
-    raise PackError('[%s] 槽位 %r 本版未实装（已实装：expr / oral / word / fill）' % (where, slot))
+    if slot == 'choice':
+        # 选择题（2026-08-20 补实装）：题面=题干+选项行（md_lines 已把 option 行拼好）；
+        # 🔴 答案可空 —— 无答案态（如讲义题目版）出练习卷合法，答案卷印「（待补答案）」。
+        raw = md_lines(ans_blocks, where + '.答案')
+        ansline = '；'.join(md_to_delim(x, where + '.答案') for x in raw) if raw else ''
+        return {'text': '<br>'.join(md_to_delim(x, where + '.题面') for x in stem_ls),
+                'ans': ansline, '_src': '答案' if raw else '无答案态'}
+
+    raise PackError('[%s] 槽位 %r 本版未实装（已实装：expr / oral / word / fill / choice）' % (where, slot))
 
 
 # ══════════════════════════════════════════════════════════════════════

@@ -421,3 +421,16 @@ def open_kb(db_path):
     conn = sqlite3.connect(str(db_path))
     conn.execute('PRAGMA foreign_keys=ON')
     return conn
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 闸④　promote 前置闸（D-21 等级审的出口：先审后上架）
+# ══════════════════════════════════════════════════════════════════════
+def assert_promotable(conn, qid):
+    """草稿→上架前置：还挂着待处理审核工单（等级审 L2/L3 图审等）的题不许上架。"""
+    n = conn.execute(
+        "SELECT COUNT(*) FROM review_ticket WHERE ref=? AND status='待处理'", (qid,)).fetchone()[0]
+    if n:
+        raise GateError(
+            f'promote 闸：{qid} 还有 {n} 张待处理审核工单——等级审没走完不许上架（先审后上，不许静默跳）。')
+    return True

@@ -30,6 +30,19 @@ CSS = """
   .ln.ind { padding-left: 3.6em; text-indent: 0; }
   .st { padding-left: 2.2em; }
   .nb { white-space: nowrap; }
+
+  /* ── 题面图（figure 块，2026-08-20 实装）──
+     宽度由**块自己的 width** 决定（内联 style 落在 <img> 上），这里只管居中与兜底：
+     🔴 max-width:100% 是硬兜底 —— 版心比图窄时宁可缩，也不许撑破版面。 */
+  img.fig { display: block; margin: 1.2mm auto; max-width: 100%; }
+
+  /* ── 题面表（table 块，2026-08-20 实装）── 细线 + 紧凑 + 单元格居中 */
+  table.tbl { border-collapse: collapse; margin: 1.2mm auto; max-width: 100%; }
+  table.tbl th, table.tbl td {
+    border: 0.4pt solid #333; padding: 0.5mm 2.2mm;
+    text-align: center; vertical-align: middle; line-height: 1.25;
+  }
+  table.tbl th { font-weight: 600; background: #f2f2f2; }
 """
 
 # 🔴 **公式后面的标点不许甩到行首**（2026-08-04 全册出到第 12 天时目检抓到）：
@@ -150,9 +163,15 @@ def fill(it, i, ans, ctx=None):
        所以本槽位只渲一格：题面（自带括号/○ 作答位）+ 答案卷在末尾补着色答案。
 
     契约：`it['text']` = 已渲好的题面 HTML（可含 \\(...\\)）；
-          `it['ans']`  = 已渲好的答案 HTML（答案卷用；着色由册子自己决定）。
+          `it['ans']`  = 已渲好的答案 HTML（答案卷用；着色由册子自己决定）；
+          `it['text_ans']` = 可选，**答案卷专用**的题面 HTML。
+
+    🔴 `text_ans` 的由来（2026-08-20 加，figure 块实装）：本槽位是唯一在答案卷
+       **重印题面**的槽 —— 题面里有图时，图会跟着重印一遍，core.py 残页闸的注释里
+       记着这笔血账（「图一重印就多出 122pt」，两次把答案卡挤出残页）。
+       所以适配层可以另给一份剥了图的题面；不给就照旧用 `text`，老册行为一字不变。
     """
-    body = glue(it['text'])
+    body = glue(it.get('text_ans') if (ans and it.get('text_ans')) else it['text'])
     if ans and it.get('ans'):
         body += '　' + it['ans']
     return '<div>%s%s</div>' % (_qn(i, ans), body)
@@ -167,7 +186,8 @@ def choice(it, i, ans, ctx=None):
     排版=正常试卷的列位：等宽 inline-block 网格，选项各占其位不流式黏连
     （布局思路采纳备课帮展示效果）。答案卷=题号+答案（不重复题面，省纸口径同 word）；
     无答案时答案卷如实印「（待补答案）」——绝不静默漏题号。
-    🔴 图选项/配图带说明文字：本版拒渲（适配层拦），占位设计已留（figure 通路批次⑥接）。"""
+    🔴 **配图题干**已通（2026-08-20 figure 实装）：图/表由适配层渲进 `it['text']`；
+       **图选项**仍拒渲（选项网格是等宽表格，塞图会撑塌列位），适配层拦。"""
     if not ans:
         # 🔴 选项网格用 <table>（2026-08-20 用户打回二修：inline-block 换行后列起点漂移，
         #    C/D 行与 A/B 行对不齐——表格单元格定列宽，跨行绝对对齐）。

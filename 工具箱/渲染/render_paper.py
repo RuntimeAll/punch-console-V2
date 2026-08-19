@@ -12,7 +12,7 @@
 ----
     python 工具箱/渲染/render_paper.py <render-pack.json> --out-dir <目录>
            [--stem <文件名主干>] [--sample-ord N] [--png]
-           [--db <kb.db>] [--no-log]
+           [--db <kb.db>] [--asset-root <目录>] [--no-log]
 
 出件
 ----
@@ -20,10 +20,21 @@
     <out-dir>/<stem>（答案）.pdf   答案卷
     <out-dir>/_源/                 中间 HTML 与目检 PNG（core 落这里）
 
+figure 的 asset 怎么落到文件（2026-08-20 实装，口径见 §一·五 AssetResolver）
+------------------------------------------------------------------------
+    figure.asset（内容 hash）→ ① pack 顶层 `assets` 带 rel_path 就直接用；
+    ② 否则**只读**开 --db 查 `asset.rel_path`；③ rel_path 一律相对 v2 根，
+    拼 --asset-root（缺省 = v2 根）转绝对 → `file:///…` 进 <img src>。
+    查不到 / 盘上没这个文件 → 拒渲，绝不出一份缺图的卷。
+
 🔴 拒渲清单（一切靠闸不靠注释，违例一律非零退出，绝不静默降级）
   · contract ≠ render-pack/v1
   · blocks 里 `$` 数目为奇数 / 出现 `$$` 显示公式
-  · 题面/答案/解析里出现 figure（图渲染待批次⑥）、option、table 块
+  · figure 缺 asset / 缺 width / width 无单位 / asset 库里查不到 / 文件不在盘上
+  · figure 的 rel_path 是绝对路径或跳出资产根（文件指针一律相对）
+  · table 块既无 md 也无 rows / GFM 无 |---| 分隔行 / 列数对不上 / 单元格被拍平成字符串
+  · text 块的 md 里夹 GFM 表（表要用 table 块，混在正文里会印成一堆竖线）
+  · expr/oral 槽位的题面里出现 figure/table（那两个槽只吃一条算式，图表题走 fill/word/choice）
   · item.section 不在该 paper 的 layout.sections 里
   · 解析的「＝」行不是纯公式（中文不许混进 LaTeX —— 渲染出件 SKILL.md §4）
   · expr/oral 槽位既无解析＝链也无答案公式（会出一份没有答案的答案卷）
@@ -55,6 +66,23 @@ from punchkit import core, layouts, renderers          # noqa: E402
 
 class PackError(Exception):
     """render-pack 不合契约 / 数据渲不了 —— 一律拒渲，不静默兜底。"""
+
+
+class Html(str):
+    """**已经渲成 HTML 的一行**（figure / table 块的产物），带 `kind`（figure|table）。
+
+    md_lines 的返回值本来全是 md 串，下游会拿去数 `$`、剥定界、判「是不是纯公式」；
+    图与表不是 md，用这个 str 子类打标：`md_to_delim` 见到它原样透出，
+    `pure_formula` / `first_formula` 一律返回 None（它压根不是公式）。
+    🔴 不给它做「HTML→md 反推」——存取同构，渲成什么就是什么，没有回转层。
+    """
+
+    __slots__ = ('kind',)
+
+    def __new__(cls, s, kind='html'):
+        o = super(Html, cls).__new__(cls, s)
+        o.kind = kind
+        return o
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -93,7 +121,11 @@ def _text_safe(s):
 
 
 def md_to_delim(md, where='?'):
-    """整段 md → HTML 串，`$…$` 换成 `\\(…\\)`。奇数个 `$` 拒渲。"""
+    """整段 md → HTML 串，`$…$` 换成 `\\(…\\)`。奇数个 `$` 拒渲。
+
+    🔴 已渲好的块（figure/table 的 Html）原样透出——它不是 md，别再解析一遍。"""
+    if isinstance(md, Html):
+        return str(md)
     md = md or ''
     try:
         pos = _dollars(md)
@@ -114,7 +146,9 @@ def md_to_delim(md, where='?'):
 
 
 def pure_formula(md, where='?'):
-    """整段就是**一个** `$…$` 时返回里面的裸 tex；否则 None。"""
+    """整段就是**一个** `$…$` 时返回里面的裸 tex；否则 None。图/表块永远 None。"""
+    if isinstance(md, Html):
+        return None
     s = (md or '').strip()
     if len(s) < 2 or not s.startswith('$'):
         return None
@@ -128,7 +162,9 @@ def pure_formula(md, where='?'):
 
 
 def first_formula(md, where='?'):
-    """取该行第一个 `$…$` 的裸 tex；整行无公式返回 None。"""
+    """取该行第一个 `$…$` 的裸 tex；整行无公式返回 None。图/表块永远 None。"""
+    if isinstance(md, Html):
+        return None
     t = pure_formula(md, where)
     if t is not None:
         return t
@@ -154,10 +190,288 @@ def stem_tex(md, where='?'):
 
 
 # ══════════════════════════════════════════════════════════════════════
+# 一·五、figure / table 两个块型（2026-08-20 实装，此前显式拒渲）
+# ══════════════════════════════════════════════════════════════════════
+# 🔴 闸口径同源于 工具箱/库/gates.py（RE_WIDTH_PCT / RE_WIDTH_ABS / RE_TABLE_SEP）。
+#    这里**不 import 闸库** —— 渲染与库彻底解耦是本工具的立身之本（见文件头）；
+#    代价是改闸时两处一起改，所以每条都在报错里写清出处，别让它们悄悄漂开。
+_RE_W_PCT = re.compile(r'^\s*(\d+(?:\.\d+)?)\s*%\s*$')
+_RE_W_ABS = re.compile(r'^\s*(\d+(?:\.\d+)?)\s*(px|pt|mm|cm|em|rem)\s*$')
+_RE_TBL_SEP = re.compile(r'^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$')
+_RE_TBL_LINE = re.compile(r'^\s*\|')
+
+# 答案卷里顶掉题面图的占位（省纸口径：题面图不在答案卷重印一遍）
+FIG_IN_Q = '（图见题目卷）'
+
+
+def fig_style(width, tag):
+    """块 width → `<img>` 的 style。
+
+    🔴 百分比 = **按块宽限宽**（闸口径 0<v≤100），绝对值原样落；两者都再压一道
+       `max-width:100%` —— 版心比图窄时宁可缩，不许撑破版面（老区宽图撑版的原病）。
+    """
+    if width is None:
+        raise PackError('[%s] figure 缺 width —— 老区 5467 个图块 100%% 带宽度，'
+                        '丢了出纸质件全靠猜、宽图撑破版面，拒渲' % tag)
+    if not isinstance(width, str):
+        raise PackError('[%s] figure.width=%r 无单位/类型非法 —— 只认 "48%%" 或 "60mm" 这类带单位值'
+                        % (tag, width))
+    m = _RE_W_PCT.match(width)
+    if m:
+        v = float(m.group(1))
+        if not (0 < v <= 100):
+            raise PackError('[%s] figure.width=%r 百分比越界（要 0<v≤100），拒渲' % (tag, width))
+        return 'width:%g%%;max-width:100%%' % v
+    m = _RE_W_ABS.match(width)
+    if m:
+        return 'width:%g%s;max-width:100%%' % (float(m.group(1)), m.group(2))
+    raise PackError('[%s] figure.width=%r 非法 —— 只认 "NN%%" 或 "NN px|pt|mm|cm|em|rem"，拒渲'
+                    % (tag, width))
+
+
+class AssetResolver(object):
+    """🔴 figure 的 `asset`（内容 hash）→ 可直接给 `<img src>` 的 `file:///` 绝对 URL。
+
+    口径三步，任何一步塌了都**拒渲**（缺图的卷=废纸，绝不静默丢图）：
+      ① **pack 自带优先**：pack 顶层 `assets`（`{hash: rel_path}` 或
+         `{hash: {"rel_path": …}}`）里有就直接用，一次库都不查
+         —— 组卷侧将来把 rel_path 一起导出来，渲染端就彻底不碰库；
+      ② **否则只读查库**：`sqlite3.connect(file:…?mode=ro, uri=True)` 查
+         `SELECT rel_path FROM asset WHERE hash=?`。mode=ro 是硬要求：渲染端对库
+         **一个数据字节都不写**，worktree/沙盘里跑也不会改主位的库。
+         ⚠️ 实测口径（2026-08-20，别当成"完全不碰盘"）：kb.db 是 WAL 库，
+         `-shm`/`-wal` 旁挂文件若不存在，**mode=ro 的读者也会把它们建出来**——
+         那是读 WAL 库的必要开销，不是数据变更。`immutable=1` 能躲开这一笔，
+         但它会**看不见还没 checkpoint 的新行**（刚入库的图查不到 → 假拒渲），
+         比建两个旁挂文件坏得多，所以不用它。这条写在这儿，免得注释撒谎。
+      ③ **rel_path 一律相对 v2 根**（schema_kb.sql asset.rel_path 的原话）：
+         绝对路径 / 跳出根 一律拒；拼 `asset_root`（缺省 = 本文件自解析的 v2 根）
+         转绝对，文件必须真的在盘上，再转 `file:///…`。
+
+    注：`asset_root` 独立于 `--db` 是有意的 —— 沙盘自测时库是副本、资产也是副本，
+    两者都要能整体挪窝；主位跑不给这个参数，就是 v2 根，与 rel_path 的定义一致。
+    """
+
+    def __init__(self, pack=None, db=None, root=None):
+        self.root = Path(root) if root else ROOT
+        self.db = Path(db) if db else None
+        self.inline = {}
+        raw = (pack or {}).get('assets') or {}
+        if isinstance(raw, dict):
+            for h, v in raw.items():
+                rel = v.get('rel_path') if isinstance(v, dict) else v
+                if isinstance(rel, str) and rel.strip():
+                    self.inline[str(h)] = rel.strip()
+        self._cache = {}
+        self._conn = None
+
+    def _rel_from_db(self, h, tag):
+        import sqlite3
+        if self.db is None:
+            raise PackError('[%s] figure 的 asset=%s 要查库拿 rel_path，但没给 --db，'
+                            'pack 里也没带 assets 表 —— 拒渲，不静默丢图' % (tag, h))
+        if not self.db.exists():
+            raise PackError('[%s] figure 的 asset=%s 要查的库不存在：%s —— 拒渲' % (tag, h, self.db))
+        if self._conn is None:
+            try:
+                self._conn = sqlite3.connect(self.db.resolve().as_uri() + '?mode=ro', uri=True)
+            except Exception as e:
+                raise PackError('[%s] 只读打开库失败（%s）：%s' % (tag, self.db, e))
+        try:
+            row = self._conn.execute('SELECT rel_path FROM asset WHERE hash=?', (h,)).fetchone()
+        except Exception as e:
+            raise PackError('[%s] 查 asset 表失败（%s）：%s' % (tag, self.db, e))
+        if not row or not row[0]:
+            raise PackError('[%s] asset=%s 在库里查不到（%s）—— 图指针悬空，拒渲不静默丢图'
+                            % (tag, h, self.db))
+        return row[0]
+
+    def url(self, h, tag):
+        if h in self._cache:
+            return self._cache[h]
+        rel = self.inline.get(h)
+        src = 'pack.assets' if rel else 'asset 表'
+        if not rel:
+            rel = self._rel_from_db(h, tag)
+        s = str(rel).replace('\\', '/').strip()
+        if not s:
+            raise PackError('[%s] asset=%s 的 rel_path 是空串（%s），拒渲' % (tag, h, src))
+        if s.startswith('/') or s.startswith('file:') or re.match(r'^[A-Za-z]:', s):
+            raise PackError('[%s] asset=%s 的 rel_path 是绝对路径 %r（%s）—— 🔴 文件指针一律相对 v2 根'
+                            '（老货架 717 行绝对路径全断的血案），拒渲' % (tag, h, rel, src))
+        base = self.root.resolve()
+        full = (base / s).resolve()
+        try:
+            full.relative_to(base)
+        except ValueError:
+            raise PackError('[%s] asset=%s 的 rel_path %r 跳出了资产根 %s，拒渲' % (tag, h, rel, base))
+        if not full.exists():
+            raise PackError('[%s] asset=%s 的文件不在盘上：%s（rel_path=%r 来自 %s，根=%s）—— '
+                            '拒渲，绝不出一份缺图的卷' % (tag, h, full, rel, src, base))
+        u = 'file:///' + str(full).replace('\\', '/')
+        self._cache[h] = u
+        return u
+
+    def close(self):
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+
+def figure_html(cell, tag, assets):
+    """figure 块 → `<img class="fig">`（一行一图，Html 打标 kind='figure'）。"""
+    asset = cell.get('asset')
+    if not isinstance(asset, str) or not asset.strip():
+        raise PackError('[%s] figure 缺 asset —— 图在流内、库里只存指针（gates.py 闸口径），拒渲' % tag)
+    asset = asset.strip()
+    style = fig_style(cell.get('width'), tag)
+    if assets is None:
+        raise PackError('[%s] 出现 figure（asset=%s）但没有 asset 解析器 —— '
+                        '给 --db <kb.db> 或让 pack 带 assets 表，拒渲不静默丢图' % (tag, asset))
+    return Html('<img class="fig" src="%s" style="%s" alt="figure %s">'
+                % (assets.url(asset, tag), style, _html.escape(asset, quote=True)),
+                kind='figure')
+
+
+def _gfm_cells(line):
+    """GFM 一行 → 单元格列表。`\\|` 是格内竖线不切（切错会把一格劈成两格）。"""
+    s = line.strip()
+    if s.startswith('|'):
+        s = s[1:]
+    cells, buf, i, n = [], [], 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == '\\' and i + 1 < n:
+            buf.append('|' if s[i + 1] == '|' else s[i:i + 2])
+            i += 2
+            continue
+        if c == '|':
+            cells.append(''.join(buf))
+            buf = []
+        else:
+            buf.append(c)
+        i += 1
+    tail = ''.join(buf)
+    if tail.strip() or not cells:
+        cells.append(tail)
+    return [x.strip() for x in cells]
+
+
+def table_from_gfm(md, tag):
+    """GFM 全表 md → HTML 表。表头行 + `|---|` 分隔行 + 若干正文行，列数必须齐。"""
+    lines = [x for x in (md or '').split('\n') if x.strip()]
+    if len(lines) < 2:
+        raise PackError('[%s] GFM 表不足两行（至少「表头行 + |---| 分隔行」），坏表拒渲' % tag)
+    seps = [i for i, x in enumerate(lines) if _RE_TBL_SEP.match(x)]
+    if not seps:
+        raise PackError('[%s] GFM 表没有 |---| 分隔行（gates.py RE_TABLE_SEP 同款判据），坏表拒渲' % tag)
+    if seps[0] != 1:
+        raise PackError('[%s] GFM 表的 |---| 分隔行落在第 %d 行 —— 必须紧跟表头行（第 2 行），坏表拒渲'
+                        % (tag, seps[0] + 1))
+    head = _gfm_cells(lines[0])
+    ncol = len(head)
+    if ncol < 1 or not any(x for x in head):
+        raise PackError('[%s] GFM 表头一格内容都没有，坏表拒渲' % tag)
+    if len(_gfm_cells(lines[1])) != ncol:
+        raise PackError('[%s] GFM 表分隔行 %d 列，表头 %d 列 —— 列数对不上，坏表拒渲'
+                        % (tag, len(_gfm_cells(lines[1])), ncol))
+    body = []
+    for i, ln in enumerate(lines[2:], start=3):
+        if not _RE_TBL_LINE.match(ln) and '|' not in ln:
+            raise PackError('[%s] GFM 表第 %d 行不是表格行：%s —— 表里混进正文（老区 121 处病根：'
+                            '会把整段吞成表格行），坏表拒渲' % (tag, i, ln.strip()[:40]))
+        row = _gfm_cells(ln)
+        if len(row) != ncol:
+            raise PackError('[%s] GFM 表第 %d 行 %d 列，表头 %d 列 —— 列数对不上，坏表拒渲'
+                            '（错位的表比没表更坏）' % (tag, i, len(row), ncol))
+        body.append(row)
+    th = ''.join('<th>%s</th>' % md_to_delim(c, '%s.表头%d' % (tag, j + 1))
+                 for j, c in enumerate(head))
+    trs = ['<tr>%s</tr>' % ''.join('<td>%s</td>' % md_to_delim(c, '%s.第%d行第%d列'
+                                                               % (tag, r + 1, j + 1))
+                                   for j, c in enumerate(row))
+           for r, row in enumerate(body)]
+    return Html('<table class="tbl"><thead><tr>%s</tr></thead><tbody>%s</tbody></table>'
+                % (th, ''.join(trs)), kind='table')
+
+
+def table_from_rows(rows, tag, assets):
+    """结构化 rows（cell 装块列表）→ HTML 表。格内认 text 与 figure，表中表/表中选项拒渲。
+
+    🔴 无表头形态（闸只给了 `rows`，没有「哪行是表头」的信号）—— 一律 `<td>`，
+       不猜第一行是不是表头（猜错=卷面撒谎）。要表头就用 GFM 形态。
+    """
+    trs, ncol = [], None
+    for ri, row in enumerate(rows):
+        if not isinstance(row, list):
+            raise PackError('[%s].rows[%d] 必须是 cell 数组（gates.py 闸口径），坏表拒渲' % (tag, ri))
+        if ncol is None:
+            ncol = len(row)
+        elif len(row) != ncol:
+            raise PackError('[%s].rows[%d] 有 %d 格，首行 %d 格 —— 列数对不上，坏表拒渲'
+                            % (tag, ri, len(row), ncol))
+        tds = []
+        for ci, cell in enumerate(row):
+            ctag = '%s.rows[%d][%d]' % (tag, ri, ci)
+            if not isinstance(cell, list):
+                raise PackError('[%s] 必须是块列表（cell 装块列表，禁拍平成字符串：拍平必丢格内图），'
+                                '坏表拒渲' % ctag)
+            inner = []
+            for bi, blk in enumerate(cell):
+                btag = '%s[%d]' % (ctag, bi)
+                if not isinstance(blk, dict):
+                    raise PackError('[%s] 单元格内的块必须是对象，坏表拒渲' % btag)
+                t = blk.get('type')
+                if t == 'text':
+                    inner.append('<br>'.join(md_to_delim(x.strip(), btag)
+                                             for x in (blk.get('md') or '').split('\n')
+                                             if x.strip()))
+                elif t in ('figure', 'image'):
+                    inner.append(str(figure_html(blk, btag, assets)))
+                else:
+                    raise PackError('[%s] 单元格内出现 %r 块 —— 格内只认 text 与 figure'
+                                    '（表中表 / 表中选项拒渲），坏表拒渲' % (btag, t))
+            tds.append('<td>%s</td>' % ''.join(inner))
+        trs.append('<tr>%s</tr>' % ''.join(tds))
+    if not ncol:
+        raise PackError('[%s].rows 一格都没有，坏表拒渲' % tag)
+    return Html('<table class="tbl"><tbody>%s</tbody></table>' % ''.join(trs), kind='table')
+
+
+def table_html(cell, tag, assets):
+    """table 块 → HTML 表。两形态（gates.py 闸口径）：md=GFM 全表 / rows=结构化 cell 块列表。"""
+    md = cell.get('md')
+    rows = cell.get('rows')
+    if isinstance(md, str) and md.strip():
+        return table_from_gfm(md, tag)
+    if isinstance(rows, list) and rows:
+        return table_from_rows(rows, tag, assets)
+    raise PackError('[%s] table 块既无 md（GFM 全表）也无 rows（结构化 cell 块列表）—— '
+                    '闸口径就这两形态，坏表拒渲' % tag)
+
+
+def _guard_inline_gfm(md, tag):
+    """🔴 text 块的 md 里夹 GFM 表 = 拒渲。
+
+    表要用 `table` 块。混在正文里的下场：渲染端按行拆，卷面印出一堆竖线与减号
+    （老区 121 处病根同源）—— 「内容一字不差却是错的」，静默印出去比拒渲坏得多。
+    """
+    lines = (md or '').split('\n')
+    for i, ln in enumerate(lines):
+        if _RE_TBL_SEP.match(ln) and i and _RE_TBL_LINE.match(lines[i - 1]):
+            raise PackError('[%s] text 块的 md 里夹了 GFM 表（第 %d 行是 |---| 分隔行）—— '
+                            '表要用 table 块，混在正文里会印成一堆竖线，拒渲：%s'
+                            % (tag, i + 1, lines[i - 1].strip()[:40]))
+
+
+# ══════════════════════════════════════════════════════════════════════
 # 二、blocks_json v2 → 文本行
 # ══════════════════════════════════════════════════════════════════════
-def md_lines(blocks, where='?'):
-    """blocks_json v2 → md 行列表。🔴 非 text 块一律拒渲（不静默丢）。"""
+def md_lines(blocks, where='?', assets=None):
+    """blocks_json v2 → 行列表：text 块出 md 串，figure/table 块出已渲好的 `Html`。
+
+    `assets` = AssetResolver（figure 才用得着）；没给而块流里有 figure = 拒渲不静默丢图。
+    """
     if blocks in (None, '', {}):
         return []
     if isinstance(blocks, str):
@@ -183,6 +497,7 @@ def md_lines(blocks, where='?'):
                 tag = '%s.row%d.cell%d' % (where, r + 1, c + 1)
                 if cell.get('type') == 'text':
                     # 🔴 题干与选项同 row 是入库闸认的合法形（快录包实存）——text 当题干行，不拒
+                    _guard_inline_gfm(cell.get('md'), tag)
                     for ln in (cell.get('md') or '').split('\n'):
                         if ln.strip():
                             out.append(ln.strip())
@@ -210,14 +525,14 @@ def md_lines(blocks, where='?'):
             t = cell.get('type')
             tag = '%s.row%d.cell%d' % (where, r + 1, c + 1)
             if t == 'text':
+                _guard_inline_gfm(cell.get('md'), tag)
                 for ln in (cell.get('md') or '').split('\n'):
                     if ln.strip():
                         out.append(ln.strip())
             elif t in ('figure', 'image'):
-                raise PackError('[%s] 出现 figure 块 —— 🔴 figure 渲染待批次⑥，'
-                                '本版拒渲不静默丢' % tag)
+                out.append(figure_html(cell, tag, assets))
             elif t == 'table':
-                raise PackError('[%s] 出现 table 块 —— 表格渲染本版未实装，拒渲' % tag)
+                out.append(table_html(cell, tag, assets))
             else:
                 raise PackError('[%s] 未知块型 %r' % (tag, t))
     return out
@@ -277,7 +592,7 @@ def split_eq_chain(tex):
     return [p for p in parts if p]
 
 
-def chain_lines(analysis, answer, where='?'):
+def chain_lines(analysis, answer, where='?', assets=None):
     """解析 → ＝链。
 
     · 取 analysis 里**以「＝」（或半角 `=`）开头**的行，剥掉行首等号与 `$` 定界，按序成 lines；
@@ -288,7 +603,12 @@ def chain_lines(analysis, answer, where='?'):
     返回 (lead, lines, 来源说明)。
     """
     lead, lines, src = None, [], '解析＝链'
-    for ln in md_lines(analysis, where + '.解析'):
+    for ln in md_lines(analysis, where + '.解析', assets):
+        if isinstance(ln, Html):
+            # ＝链按定义只收算式行；解析里的图/表进不了链。不静默 —— 喊出来让人看见。
+            print('  ⚠️ [%s.解析] 有一个 %s 块 —— ＝链只收算式行，该块不进答案卷'
+                  % (where, ln.kind))
+            continue
         if ln[0] in '＝=':
             rest = ln[1:].strip()
             t = pure_formula(rest, where + '.解析')
@@ -307,26 +627,49 @@ def chain_lines(analysis, answer, where='?'):
                 lead = t
     if lines:
         return lead, lines, src
-    for ln in md_lines(answer, where + '.答案'):
+    for ln in md_lines(answer, where + '.答案', assets):
         t = first_formula(ln, where + '.答案')
         if t is not None:
             return lead, [t], '答案首式（解析无＝链）'
     return lead, [], '无'
 
 
-def adapt_item(item, slot, where='?'):
+def stem_for_answer(stem_ls, where='?'):
+    """题面行 → **答案卷版**题面 HTML 行。
+
+    🔴 省纸口径（renderers/math.py `word` 的原话、core.py 残页闸的病根）：
+       答案卷不重复题面图 —— 一张线段图重印就多出 122pt，直接把答案卡挤出一张残页。
+       图换成「（图见题目卷）」六个字，家长手里本来就有题目卷。
+       表**保留**：表格常是题面数据本身，剥了答案就看不懂（且表比图矮得多）。
+    """
+    out = []
+    for x in stem_ls:
+        if isinstance(x, Html) and x.kind == 'figure':
+            out.append(FIG_IN_Q)
+        else:
+            out.append(md_to_delim(x, where))
+    return out
+
+
+def adapt_item(item, slot, where='?', assets=None):
     """一道 paper_item → 渲染器槽位数据。slot 决定形状（renderers/math.py 契约）。"""
     q = item.get('question') or {}
     stem_blocks = q.get('blocks')
     ans_blocks = q.get('answer_blocks')
     ana_blocks = q.get('analysis_blocks')
-    stem_ls = md_lines(stem_blocks, where + '.题面')
+    stem_ls = md_lines(stem_blocks, where + '.题面', assets)
     if not stem_ls:
         raise PackError('[%s] 题面块流为空' % where)
 
     if slot in ('expr', 'oral'):
+        # 🔴 这两个槽位只吃**一条算式**（stem_ls[0] 进 Tex，别的行本来就用不上），
+        #    题面里有图/表说明选错槽了 —— 拒渲，绝不静默把图丢掉出一份缺图的卷。
+        bad = [x.kind for x in stem_ls if isinstance(x, Html)]
+        if bad:
+            raise PackError('[%s] %s 槽的题面里有 %s 块 —— 该槽只渲一条算式，图表题请走 '
+                            'fill / word / choice 槽，拒渲不静默丢' % (where, slot, '/'.join(bad)))
         # 题面第一个 text 块的 md 当原式；＝链来自解析
-        lead, lines, src = chain_lines(ana_blocks, ans_blocks, where)
+        lead, lines, src = chain_lines(ana_blocks, ans_blocks, where, assets)
         if not lines:
             raise PackError('[%s] 既无解析＝链也无答案公式 —— 答案卷会没有答案，拒渲' % where)
         pure = pure_formula(stem_ls[0], where + '.题面')
@@ -338,18 +681,19 @@ def adapt_item(item, slot, where='?'):
                 'lines': lines, '_src': src}
 
     if slot == 'word':
-        lead, lines, src = chain_lines(ana_blocks, ans_blocks, where)
+        lead, lines, src = chain_lines(ana_blocks, ans_blocks, where, assets)
         if lead:
             lines = [lead] + lines
         if not lines:
             raise PackError('[%s] 应用题解析无算式行、答案也无公式，拒渲' % where)
+        # word 的答案卷本来就不重印题面（省纸口径），题面图天然不会重复出现
         ansline = '<br>'.join(md_to_delim(x, where + '.答案')
-                              for x in md_lines(ans_blocks, where + '.答案')) or '答：见解析。'
+                              for x in md_lines(ans_blocks, where + '.答案', assets)) or '答：见解析。'
         return {'text': '<br>'.join(md_to_delim(x, where + '.题面') for x in stem_ls),
                 'lines': lines, 'ansline': ansline, '_src': src}
 
     if slot == 'fill':
-        raw = md_lines(ans_blocks, where + '.答案')
+        raw = md_lines(ans_blocks, where + '.答案', assets)
         ans_html = ''
         if raw:
             t = pure_formula(raw[0], where + '.答案')
@@ -360,7 +704,10 @@ def adapt_item(item, slot, where='?'):
                         '<span class="ansv" style="color:%s">%s</span>'
                         % (renderers.get('math').ANSWER_COLOR,
                            md_to_delim(raw[0], where + '.答案')))
+        # 🔴 fill 是**唯一在答案卷重印题面**的槽（renderers/math.py fill），
+        #    所以只有它需要一份剥了图的题面：text_ans（省纸口径不破）。
         return {'text': '<br>'.join(md_to_delim(x, where + '.题面') for x in stem_ls),
+                'text_ans': '<br>'.join(stem_for_answer(stem_ls, where + '.题面')),
                 'ans': ans_html, '_src': '答案首行'}
 
     if slot == 'choice':
@@ -375,27 +722,35 @@ def adapt_item(item, slot, where='?'):
             stem_blocks_d = stem_blocks
         for r, row in enumerate(stem_blocks_d.get('rows') or []):
             cells = row.get('cells') or []
-            if any(c.get('type') == 'option' for c in cells):
-                for cell in cells:
-                    if cell.get('type') == 'text':
-                        # 题干与选项同 row 的合法变形：text 归题干
-                        for ln in (cell.get('md') or '').split('\n'):
-                            if ln.strip():
-                                stem_html.append(md_to_delim(ln.strip(), where + '.题面'))
-                        continue
+            for c, cell in enumerate(cells):
+                tag = '%s.题面.row%d.cell%d' % (where, r + 1, c + 1)
+                t = cell.get('type')
+                if t == 'text':
+                    # 题干与选项同 row 的合法变形：text 归题干
+                    _guard_inline_gfm(cell.get('md'), tag)
+                    for ln in (cell.get('md') or '').split('\n'):
+                        if ln.strip():
+                            stem_html.append(md_to_delim(ln.strip(), where + '.题面'))
+                elif t == 'option':
                     label = (cell.get('label') or '').strip()
+                    for b in (cell.get('blocks') or []):
+                        if b.get('type') != 'text':
+                            raise PackError('[%s] 选项 %s 里嵌了 %r 块 —— 🔴 图/表选项本版拒渲不静默'
+                                            '（选项网格是等宽表格，塞图会撑塌列位）'
+                                            % (tag, label or '?', b.get('type')))
                     inner = ' '.join(
                         ' '.join(ln.strip() for ln in (b.get('md') or '').split('\n') if ln.strip())
-                        for b in (cell.get('blocks') or []) if b.get('type') == 'text')
+                        for b in (cell.get('blocks') or []))
                     options.append({'label': label,
                                     'html': md_to_delim(inner, '%s.选项%s' % (where, label)),
                                     '_len': _plain_len(inner)})
-            else:
-                for cell in cells:
-                    if cell.get('type') == 'text':
-                        for ln in (cell.get('md') or '').split('\n'):
-                            if ln.strip():
-                                stem_html.append(md_to_delim(ln.strip(), where + '.题面'))
+                elif t in ('figure', 'image'):
+                    # 🔴 配图题干（2026-08-20 实装）：此前这一支被静默跳过，图整个丢了
+                    stem_html.append(str(figure_html(cell, tag, assets)))
+                elif t == 'table':
+                    stem_html.append(str(table_html(cell, tag, assets)))
+                else:
+                    raise PackError('[%s] 未知块型 %r' % (tag, t))
         if not options:
             raise PackError('[%s] choice 槽但题面无 option 块 —— 选择题包坏形' % where)
         longest = max(o['_len'] for o in options)
@@ -515,7 +870,7 @@ def load_pack(path):
 _SELF_NUMBERED_LAYOUTS = {'exam_paper'}
 
 
-def build_days(papers):
+def build_days(papers, assets=None):
     """→ (days, per_paper, layout_key, body_pt, watermark)"""
     days, per = [], []
     keys, pts, wms = set(), [], []
@@ -556,7 +911,7 @@ def build_days(papers):
                 raise PackError('[%s] 节「%s」有 %d 题 —— 渲染器答案卷圈码只有 ①~⑩，拒渲'
                                 % (pw, s['name'], len(grp)))
             day.append([adapt_item(it, s['slot'],
-                                   '%s.%s#%s' % (pw, s['name'], it.get('ord')))
+                                   '%s.%s#%s' % (pw, s['name'], it.get('ord')), assets)
                         for it in grp])
         days.append(day)
         per.append({'sections': secs, 'layout': lay,
@@ -612,7 +967,10 @@ def main(argv=None):
     ap.add_argument('--stem', help='文件名主干（缺省=artifact.name）')
     ap.add_argument('--sample-ord', type=int, help='只渲这一天/这一卷（按 paper.ord）')
     ap.add_argument('--png', action='store_true', help='额外出目检 PNG')
-    ap.add_argument('--db', default=str(DEFAULT_DB), help='skill_log 库（缺省 <v2根>/知识库/kb.db）')
+    ap.add_argument('--db', default=str(DEFAULT_DB),
+                    help='skill_log 落账库 + figure 的 asset.rel_path 只读查询库'
+                         '（缺省 <v2根>/知识库/kb.db）')
+    ap.add_argument('--asset-root', help='asset.rel_path 的解析根（缺省 = v2 根；沙盘/副本资产用）')
     ap.add_argument('--no-log', action='store_true', help='不落 skill_log（沙盘自测用）')
     a = ap.parse_args(argv)
     t0 = time.time()
@@ -626,7 +984,11 @@ def main(argv=None):
             papers = [p for p in papers if p.get('ord') == a.sample_ord]
             if not papers:
                 raise PackError('--sample-ord %d 没有对应的 paper' % a.sample_ord)
-        days, per, key, body_pt, wm = build_days(papers)
+        # 🔴 asset 解析器（figure 用）：pack 自带 assets 优先，否则只读查 --db；
+        #    懒连接 —— 一张图都没有的册子根本不会碰库（沙盘/worktree 里跑得动的关键）。
+        assets = AssetResolver(pack, db=a.db, root=a.asset_root)
+        days, per, key, body_pt, wm = build_days(papers, assets)
+        assets.close()
 
         L = layouts.get(key)
         R = renderers.get(pack.get('subject') or 'math')

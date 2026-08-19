@@ -775,7 +775,11 @@ def adapt_item(item, slot, where='?', assets=None):
         if not options:
             raise PackError('[%s] choice 槽但题面无 option 块 —— 选择题包坏形' % where)
         longest = max(o['_len'] for o in options)
-        opt_cols = 4 if longest <= 10 else (2 if longest <= 26 else 1)
+        # 🔴 两列门槛 30（2026-08-20 卷 3 逐页目检校准，原为 26）：卷 3 第 10 题最长选项
+        #    「绝对值等于它本身的数是非负数」实测 28，原卷排的是**两列**，26 的门槛把它
+        #    掉成一列 —— 一题多占两行、整卷多印一页。两列每列净宽 ≈ 22 个半角位，
+        #    容得下 30；再宽（如 46 的长句选项）才落单列。
+        opt_cols = 4 if longest <= 10 else (2 if longest <= 30 else 1)
         if any(o['_figs'] for o in options):
             # 图选项两列（对标卷2题5 原卷 2×2 排法）；图宽按列数放大折算回原尺寸，92% 封顶防贴边
             opt_cols = min(opt_cols, 2)

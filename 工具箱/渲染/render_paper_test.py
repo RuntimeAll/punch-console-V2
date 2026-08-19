@@ -525,6 +525,128 @@ def negative(tmp):
     rejects('section 不在 layout.sections 里', p, tmp)
 
 
+# ══════════════ 四、exam_paper 骨架：四条闸 + 卷面口径 ══════════════
+# 🔴 对标件 = 测试数据/七上试卷/卷3（4 张拍照卷面）。2026-08-20 全量 24 题渲染实测校准：
+#    页1 正文左 25.2mm / 页2~4 左 10.2mm（密封线与走廊只吃第 1 页）、行距 8.29mm、
+#    题号全卷 1..24 连号、解答题题号带分值、表铺 88% 版心。
+def _ep_ctx(secs, lay):
+    return {'renderer': RP.renderers.get('math'), 'sections': secs,
+            'book_title': '七年级数学上册单元测试卷', 'paper_layout': lay}
+
+
+def _ep_fill(t):
+    return {'text': t, 'text_ans': t, 'ans': '（待补答案）'}
+
+
+def _ep_case(full=20, scores0=(3, 3), seal=True):
+    """两节四题的最小真卷：选择 3+3 分（不印逐题分值）＋解答 6+8 分（印）。"""
+    secs = [{'name': '一、选择题', 'slot': 'fill', 'score_note': '每小题 3 分，共 6 分',
+             'item_scores': list(scores0), 'show_item_score': False},
+            {'name': '二、解答题', 'slot': 'fill', 'score_note': '共 14 分',
+             'item_scores': [6, 8]}]
+    lay = {'full_score': full, 'duration_min': 120, 'subtitle': '第1章 有理数',
+           'score_table': True, 'seal_line': seal}
+    day = [[_ep_fill('题一'), _ep_fill('题二')], [_ep_fill('题三'), _ep_fill('题四')]]
+    return secs, lay, day
+
+
+def araises(name, fn, kw=None):
+    """反例（骨架闸走 assert）：必须抛 AssertionError，且报错带 kw。"""
+    try:
+        fn()
+        ok('拒渲：' + name, False, '没抛错')
+    except AssertionError as e:
+        ok('拒渲：' + name, (kw in str(e)) if kw else True, str(e)[:110])
+
+
+def unit_exam_paper():
+    print('\n── exam_paper 骨架单测（卷 3 复刻口径） ──')
+    EP = RP.layouts.get('exam_paper')
+    secs, lay, day = _ep_case()
+    card = EP.render_card(0, day, False, _ep_ctx(secs, lay))
+    body = '<body>' + card + '</body>'
+
+    qn = [m for m in RP.re.findall(r'<span class="qn">([^<]*)</span>', card)]
+    ok('题号全卷连号（跨节不重置）', [q[:2] for q in qn] == ['1.', '2.', '3.', '4.'], repr(qn))
+    ok('解答题题号带分值「3.(6 分)」', qn[2] == '3.(6 分)' and qn[3] == '4.(8 分)', repr(qn))
+    ok('选择题 show_item_score=False 时题号不带分值',
+       qn[0] == '1.' and qn[1] == '2.', repr(qn))
+    ok('大题节标题=半角括号带分值',
+       '<div class="sec">一、选择题(每小题 3 分，共 6 分)</div>' in card
+       and '<div class="sec">二、解答题(共 14 分)</div>' in card, card[:0])
+    ok('组卷侧节名自带「一、」不重复印',
+       '一、一、' not in card and '二、二、' not in card)
+    ok('密封线：字段列 + 「密封线」列 + 虚线 + 首页走廊占位',
+       'class="sealgap"' in card and 'class="sealbar"' in card
+       and '<div class="col f"><span>学校<i></i>班级' in card and 'class="dash"' in card)
+    ok('答案卷不带卷头/密封线（省纸口径）',
+       'sealbar' not in EP.render_card(0, day, True, _ep_ctx(secs, lay))
+       and 'stab' not in EP.render_card(0, day, True, _ep_ctx(secs, lay)))
+    EP.guard(body, [day], _ep_ctx(secs, lay))
+    ok('guard 正例：题号连号 + 无超长 nowrap + 走廊占位齐', True)
+
+    # ── 反例①满分守恒闸（凡"拍平"必配守恒闸）──
+    s2, l2, d2 = _ep_case(full=99)
+    araises('满分守恒闸：逐题合计 20 ≠ 卷头 99',
+            lambda: EP.render_card(0, d2, False, _ep_ctx(s2, l2)), '满分守恒闸')
+    # ── 反例② item_scores 数量闸 ──
+    s3, l3, d3 = _ep_case(scores0=(3,))
+    araises('item_scores 给 1 个而本节 2 题',
+            lambda: EP.render_card(0, d3, False, _ep_ctx(s3, l3)), 'item_scores')
+    # ── 反例③题号连号闸 ──
+    araises('题号连号闸：第 3 题被改成 9',
+            lambda: EP.guard(body.replace('<span class="qn">3.', '<span class="qn">9.'),
+                             [day], _ep_ctx(secs, lay)), '题号不连续')
+    # ── 反例④防缩页闸（Chrome 只会静默缩印，出件前拒得掉才便宜）──
+    long_nb = '<span class="nb">%s</span>' % ('长' * 30)
+    araises('防缩页闸：整句被裹进 nowrap',
+            lambda: EP.guard(body.replace('题一', '题一' + long_nb),
+                             [day], _ep_ctx(secs, lay)), '防缩页闸')
+    # ── 反例⑤首页走廊闸 ──
+    araises('首页走廊闸：密封线在、走廊占位没了',
+            lambda: EP.guard(body.replace('<div class="sealgap"></div>', ''),
+                             [day], _ep_ctx(secs, lay)), '首页走廊闸')
+
+    # ── _unnb 正例：裹错的超长 nowrap 在渲染时就被拆掉，闸才可能是常绿的 ──
+    day_nb = [[_ep_fill('题一' + long_nb), _ep_fill('题二')],
+              [_ep_fill('题三'), _ep_fill('题四')]]
+    card_nb = EP.render_card(0, day_nb, False, _ep_ctx(secs, lay))
+    ok('🔴 _unnb 拆包：超长 nowrap 渲完一个不剩（内容一字不动）',
+       not EP._long_nb(card_nb) and '长' * 30 in card_nb)
+
+    # ── CSS 口径（卷 3 像素实测反推，改一个数就该有人看见）──
+    css = EP.css()
+    ok('缺省正文 11.2pt / 行距 2.08 / 悬挂缩进 1em',
+       'font-size: 11.20pt' in css and 'line-height: 2.08' in css
+       and '.q > div { padding-left: 1em; text-indent: -1em; }' in css)
+    ok('末尾作答留白不顶出空页', '.card > .sp:last-child { display: none; }' in css)
+    ok('🔴 密封线只吃第 1 页：absolute + 固定 272mm 高（不是 fixed）',
+       '.sealbar { position: absolute; left: 0; top: 0; height: 272mm;' in css
+       and 'position: fixed' not in css.split('.wm {')[0])
+    ok('首页走廊：float 占位 15.2mm + 卡内块自成 BFC + 评分表明码减走廊',
+       '.sealgap { float: left; width: 15.2mm; height: 272mm; }' in css
+       and 'display: flow-root' in css
+       and '.card.sealed > .stab { width: calc(100% - 15.2mm); }' in css)
+    ok('题面表铺 88% 版心 + 表头白底常规字重（真卷长相）',
+       '.q table.tbl { width: 88%; }' in css
+       and '.q table.tbl th { background: none; font-weight: normal; }' in css)
+    ok('选项表边距归零（防横向溢出 ⇒ 防整卷缩印）',
+       '.q table:not(.tbl) { margin: 0 !important; text-indent: 0; }' in css)
+
+    # ── 选项列数门槛（卷 3 第 10 题实测校准）──
+    opt = lambda l, t: {'type': 'option', 'label': l,                       # noqa: E731
+                        'blocks': [{'type': 'text', 'role': '题面', 'md': t}]}
+    j3q10 = {'v': 2, 'rows': [{'cells': [
+        {'type': 'text', 'role': '题面', 'md': '下列语句错误的是(　　).'},
+        opt('A', '相反数是它本身的数是 $0$'), opt('B', '负数的绝对值是正数'),
+        opt('C', '$0$ 是最小的有理数'), opt('D', '绝对值等于它本身的数是非负数')]}]}
+    d10 = RP.adapt_item({'question': {'blocks': j3q10, 'answer_blocks': None,
+                                      'analysis_blocks': None}}, 'choice', 'T')
+    ok('choice 门槛校准：卷 3 第 10 题（最长 28）排两列，同原卷',
+       RP._plain_len('绝对值等于它本身的数是非负数') == 28 and d10['opt_cols'] == 2,
+       repr(d10.get('opt_cols')))
+
+
 def main():
     if not SAMPLE.exists():
         sys.exit('🔴 样例不存在：%s' % SAMPLE)
@@ -535,6 +657,7 @@ def main():
         unit_choice()
         unit_figure(root, db)
         unit_table(root, db)
+        unit_exam_paper()
         negative(tmp)
         negative_figtable(tmp)
         positive(tmp)

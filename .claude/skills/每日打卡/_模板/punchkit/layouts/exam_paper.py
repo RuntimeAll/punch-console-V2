@@ -31,6 +31,13 @@
      见 `_unnb()` 与 CSS 的「防缩页」段；`guard()` 里有对应的闸，摘掉立刻红。
   8. **一卷 = 一张卡，内容自然流到多页**：所以页边距走 `@page margin`（每页都有），
      不能像别的骨架那样用 `.card` 的上下 padding（那个只作用在首页与末页）。
+  9. 🔴 **密封线与它的走廊只吃第 1 页**（2026-08-20 逐页目检实伤）：原卷页 2~4 的
+     正文左边就是 10.2mm，没有装订走廊。此前整卷每页都缩 10mm，卷 3 因此多印一整页。
+     实现＝密封线 `position:absolute` + 首页走廊 `float:left` 空占位（各 272mm 高），
+     卡内块 `display:flow-root` 自成 BFC 避开浮动，`.stab` 明码减去走廊宽。
+     见 `SEAL_*` 常量与 `guard()` 的首页走廊闸。
+  10. **题面数据表铺到 88% 版心并居中**（原卷两张表实测 165.9/169.0mm ÷ 189.3mm），
+     表头白底常规字重 —— 渲染器缺省的 auto 宽 + 灰底表头是屏显习惯，不是卷面长相。
 
 🔴 **学科无关**：`ctx['renderer']` 挂谁都行；选择题槽沿用渲染器的 `tpl-choice-v1`
    列位口径（`<table>` 网格，跨行绝对对齐），本骨架**不重写选项排布**。
@@ -47,7 +54,7 @@ SPEC = {
     '学科': '通用',
     '长相': '居中大标题 + 副标题 + 「（满分：N 分　考试时间：N 分钟）」副标行；'
             '可选姓名行 / 「题号—得分」评分表 / 左侧装订密封线（字段列带填写横线 + '
-            '「密封线」竖列 + 竖虚线，一律竖排自下而上读，同真卷）；'
+            '「密封线」竖列 + 竖虚线，一律竖排自下而上读，**只印第 1 页**，同真卷）；'
             '黑体大题节标题带分值「一、选择题(每小题 3 分，共 33 分)」；'
             '🔴 题号**全卷连号**、解答题题号带分值「16.(6 分)」；'
             '全卷一个行距 2.08em、缩进只有 1em 一级，一卷多页连排',
@@ -68,7 +75,8 @@ SPEC = {
             'gap_each 每题后留白mm｜gap 节末留白mm｜cols 节内分栏数；'
             '🔴 一比一复刻卷 3 的推荐值：body_pt 11.2',
     '闸': '满分守恒闸（逐题分值合计 == 卷头满分）｜item_scores 数量闸｜'
-          '题号连号闸（guard）｜防缩页闸（guard：超长 nowrap 片段一个不许留）',
+          '题号连号闸（guard）｜防缩页闸（guard：超长 nowrap 片段一个不许留）｜'
+          '首页走廊闸（guard：密封线条数 == .sealgap 占位数）',
 }
 
 CN = '一二三四五六七八九十'
@@ -79,15 +87,35 @@ DEFAULT_PT = 11.2
 LINE_H = 2.08                    # 行距/em，实测行距 50.4px = 8.27mm ÷ 3.95mm
 HANG_EM = 1.0                    # 悬挂缩进：实测续行/选项行一律缩进 26px ≈ 1 em
 MARGIN_TOP, MARGIN_BOTTOM = 13.0, 12.0
-BODY_X_MM = 10.0                 # 正文左右页边（卷 3 实测 10.2mm）
-# 🔴 密封线要探到距页左 4.5mm —— 比正文页边还靠外。Chrome 打印会把 position:fixed
+PAGE_H = 297.0                   # A4
+CONTENT_H = PAGE_H - MARGIN_TOP - MARGIN_BOTTOM   # 272mm = 一页版心高（首页走廊/密封线的高）
+BODY_X_MM = 10.0                 # 正文左右页边（卷 3 页2~4 实测 10.2mm）
+# 🔴 密封线要探到距页左 4.5mm —— 比正文页边还靠外。Chrome 打印会把定位元素
 #    **裁在 @page 版心边上**（实测：left:-5.5mm 那一段直接不印），所以只能反过来：
 #    @page 边距先退到 4.5mm 给密封线腾地方，正文再用 .card 的左右 padding 补回 5.5mm
 #    （🔴 横向 padding 每页都算数，只有纵向 padding 才是"只作用在首末页"的那个坑）。
-MARGIN_X = 4.5                   # @page 左右边距 = 密封线最外一列的落点
+MARGIN_X = 4.5                   # @page 左右边距 = 密封线可落的最外沿
 CARD_PAD_MM = BODY_X_MM - MARGIN_X          # 5.5mm，.card 左右各补这么多
-SEAL_GUTTER_MM = 10.5            # 开装订线时正文额外让出的左侧走廊（卷 3 实测 10.3mm）
-SEAL_PAD_MM = CARD_PAD_MM + SEAL_GUTTER_MM  # 16mm = 密封线页 .card 的 padding-left
+# 🔴 **密封线与走廊只吃第 1 页**（2026-08-20 卷 3 逐页目检实伤修正）：
+#    原卷只有第 1 页有装订线，页 2~4 的正文左边就是 10.2mm；此前用
+#    `position:fixed` + `.card.sealed{padding-left}` 是**每页都缩 10mm**，
+#    白白窄掉一条走廊 —— 24 题的卷 3 因此多印一整页（5 页 vs 原卷 4 页）。
+#    改法两条，缺一不可：
+#      ① 密封线改 `position:absolute`（相对 .card 的 padding 盒，left:0 = 版心左边），
+#         top:0 + 固定 272mm 高 ⇒ 只落在第 1 页；
+#      ② 首页走廊改一个 `float:left` 的空占位（同样 272mm 高）—— 浮动只吃第 1 页，
+#         第 2 页起自动让开。🔴 光靠浮动不够：块级子元素的**边框盒**会与浮动重叠
+#         （只有行盒会避让，负 text-indent 还会探进走廊里），所以卡内各块要
+#         `display:flow-root` 自成 BFC 才会整块避到浮动右边；而 `.stab`（width:100%）
+#         这类**表格**在浮动旁放不下会被整个顶到浮动下方（实测：卷头评分表掉到第 2 页），
+#         必须明码 `calc(100% - 走廊宽)`。
+SEAL_GUTTER_MM = 15.2            # 页1 正文额外让出的走廊（原卷正文左 25.2mm − 10mm）
+SEAL_BAR_MM = CARD_PAD_MM + SEAL_GUTTER_MM  # 20.7mm = 密封线带宽（4.5mm → 25.2mm）
+# 密封线三列的落点（距版心左边，即距页左 MARGIN_X）—— 原卷页1 像素实测：
+#   字段文字 7.4~10.5mm、字段横线 11.0mm、「密封线」三字骑在虚线上、虚线 18.4mm
+SEAL_F_LEFT = 2.7                # 字段列（学校/班级/姓名/学号）左沿 ⇒ 落在 7.2mm
+SEAL_M_LEFT = 11.4               # 「密封线」列左沿 ⇒ 列心 18.4mm
+SEAL_DASH_LEFT = 13.9            # 竖虚线 ⇒ 18.4mm（与「密封线」列心重合）
 
 CSS = """
   @page { size: A4; margin: __MT__mm __MX__mm __MB__mm; }
@@ -96,7 +124,7 @@ CSS = """
 
   /* 一卷 = 一张卡；卡内容自然流到多页，卡与卡之间强制分页。
      左右 padding 把 @page 让给密封线的那 5.5mm 补回来（横向 padding 每页都在）。 */
-  .card { page-break-after: always; padding: 0 __CPAD__mm; }
+  .card { page-break-after: always; padding: 0 __CPAD__mm; position: relative; }
   .card:last-child { page-break-after: auto; }
   /* 末尾那块作答留白别自己顶出一张空白页（卷 3 复刻实伤：题目卷白白多印一页） */
   .card > .sp:last-child { display: none; }
@@ -144,20 +172,33 @@ CSS = """
   .q table:not(.tbl) { margin: 0 !important; text-indent: 0; }
   .q table:not(.tbl) td { padding-top: 0 !important; padding-bottom: 0 !important; }
 
+  /* ═══ 题面数据表（renderers 的 table.tbl）══════════════════════════════
+     真卷的表是**铺开**的：卷 3 两张表实测 165.9mm / 169.0mm，版心 189.3mm ⇒ 都是 88%，
+     左右居中。渲染器缺省 width:auto（按内容收缩）——卷 3 第 22 题的表只占 40% 版心，
+     跟原卷完全两个样。表头也不带灰底（真卷是白底常规字重，灰底是屏显习惯）。 */
+  .q table.tbl { width: 88%; }
+  .q table.tbl th { background: none; font-weight: normal; }
+
   /* ═══ 左侧装订密封线（可选）═══
-     🔴 一卷多页 ⇒ 只能用 position:fixed（Chrome 打印时每页重绘一次）；
-     absolute 只会印在第一页上。position:fixed 的 left:0 = **版心左边**
-     （@page margin 之内），所以走廊宽度就等于 .card 让出的那一条。
-     竖排一律「自下而上读」（原卷：从下往上是 学校__班级__姓名__学号__ / 密封线），
-     用 rotate(-90deg) 而不是 writing-mode —— writing-mode 只能自上而下读，反了。 */
-  .card.sealed { padding-left: __SEALPAD__mm; }
-  .sealbar { position: fixed; left: 0; top: 0; bottom: 0; width: __SEAL__mm; }
+     🔴 **只在第 1 页**（见顶部 SEAL_* 常量的血账）：密封线走 position:absolute
+     （相对 .card 的 padding 盒 ⇒ left:0 = 版心左边，@page margin 之内）+ 固定 272mm 高，
+     首页走廊走一个等高的 float 空占位。竖排一律「自下而上读」
+     （原卷：从下往上是 学校__班级__姓名__学号__ / 密封线），用 rotate(-90deg)
+     而不是 writing-mode —— writing-mode 只能自上而下读，反了。 */
+  .sealgap { float: left; width: __GUT__mm; height: __CH__mm; }
+  /* 🔴 块级子元素要自成 BFC 才会整块避开浮动（只有行盒会自动避让） */
+  .card.sealed > h1, .card.sealed > .sub, .card.sealed > .meta,
+  .card.sealed > .hnote, .card.sealed > .names,
+  .card.sealed > .sec, .card.sealed > .q, .card.sealed > .cols { display: flow-root; }
+  /* 🔴 width:100% 的表在浮动旁边放不下会被整个顶到浮动下方（评分表掉页实伤） */
+  .card.sealed > .stab { width: calc(100% - __GUT__mm); }
+  .sealbar { position: absolute; left: 0; top: 0; height: __CH__mm; width: __BAR__mm; }
   .sealbar .col { position: absolute; top: 0; bottom: 0;
                   display: flex; align-items: center; justify-content: center; }
   .sealbar .col > span { white-space: nowrap; transform: rotate(-90deg);
                          font-size: .95em; }
-  .sealbar .f { left: 0; width: 4.5mm; }
-  .sealbar .m { left: 8.9mm; width: 5mm; }
+  .sealbar .f { left: __SFL__mm; width: 4.5mm; }
+  .sealbar .m { left: __SML__mm; width: 5mm; }
   /* 「密」「封」「线」三字要撒满整页高：实测字心间距 44mm（≈10.4em）。
      letter-spacing 会在末字后面也留一格 ⇒ 补等量 padding-left 才居得正。 */
   .sealbar .m > span { letter-spacing: 10.4em; padding-left: 10.4em; }
@@ -165,7 +206,7 @@ CSS = """
   .sealbar .f i { display: inline-block; width: 36mm; border-bottom: .3mm solid #000;
                   font-style: normal; margin: 0 3mm; }
   /* 「密封线」三个字**骑在虚线上**（原卷原样），所以虚线落在 .m 列中线 */
-  .sealbar .dash { position: absolute; left: 11.4mm; top: 0; bottom: 0;
+  .sealbar .dash { position: absolute; left: __SDL__mm; top: 0; bottom: 0;
                    border-left: .3mm dashed #000; }
 
   .wm { position: fixed; right: __CPAD__mm; bottom: 0;
@@ -326,8 +367,12 @@ def css(pt=None, body_pt=None):
                .replace('__MX__', '%g' % MARGIN_X)
                .replace('__MB__', '%g' % MARGIN_BOTTOM)
                .replace('__CPAD__', '%g' % CARD_PAD_MM)
-               .replace('__SEALPAD__', '%g' % SEAL_PAD_MM)
-               .replace('__SEAL__', '%g' % (SEAL_GUTTER_MM + CARD_PAD_MM))) + _default.CSS
+               .replace('__CH__', '%g' % CONTENT_H)
+               .replace('__GUT__', '%g' % SEAL_GUTTER_MM)
+               .replace('__BAR__', '%g' % SEAL_BAR_MM)
+               .replace('__SFL__', '%g' % SEAL_F_LEFT)
+               .replace('__SML__', '%g' % SEAL_M_LEFT)
+               .replace('__SDL__', '%g' % SEAL_DASH_LEFT)) + _default.CSS
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -375,16 +420,21 @@ _SEAL_FIELDS = ('学校', '班级', '姓名', '学号')
 
 
 def _seal(lay):
-    """左侧装订密封线 = 字段列（每项后带填写横线）+「密封线」竖列 + 竖虚线。
+    """左侧装订密封线 = 字段列（每项后带填写横线）+「密封线」竖列 + 竖虚线，**只印第 1 页**。
 
-    卷 3 实测（距页左，mm）：字段列 4.9~9.8｜「密封线」列 13.1~15.5｜虚线 15.7｜
-    正文起 20.5 —— 三样东西全在 10.3mm 宽的走廊里，自下而上读。
+    卷 3 页1 像素实测（距页左，mm）：字段文字 7.4~10.5｜字段横线 11.0｜
+    「密封线」三字骑在虚线上｜虚线 18.4｜正文起 25.2 —— 全在 20.7mm 宽的带子里，
+    自下而上读；页 2~4 没有这条带子，正文左边回到 10.2mm。
+
+    🔴 `.sealgap` 那个空 div 不是装饰：它是**只吃第 1 页的走廊**（float 到第 2 页自动消失），
+       删了正文会盖到密封线上。guard() 有一条闸盯着它，摘掉立刻红。
     """
     if not _f(lay, 'seal_line', '密封线'):
         return '', ''
     fields = _f(lay, 'seal_fields', '密封线字段') or _SEAL_FIELDS
     txt = _f(lay, 'seal_text', '密封线文字') or '密封线'
     return (' sealed',
+            '<div class="sealgap"></div>'
             '<div class="sealbar">'
             '<div class="col f"><span>%s</span></div>'
             '<div class="col m"><span>%s</span></div>'
@@ -493,7 +543,7 @@ _QN_TXT = re.compile(r'<span class="qn">\s*(\d+)\s*[.．]')
 def guard(html, days, ctx):
     """🔴 **题号连号闸 + 防缩页闸**（只在题目卷跑）。
 
-    真卷的题号是全卷 1..N 一路排下去的，学生对答案、老师登分都按这个号走；
+    另加**首页走廊闸**（见下）。真卷的题号是全卷 1..N 一路排下去的，学生对答案、老师登分都按这个号走；
     题号错位是那种"印出来才发现、印了几百份"的事故。所以出件前按渲出来的 HTML
     实数一遍：每张卷的题号必须恰好是 1,2,…,N，N = 该卷各节题数之和。
     （能拒错才算闸——把 `_renumber` 摘掉、或把节内下标漏传，这条立刻红。）
@@ -507,6 +557,14 @@ def guard(html, days, ctx):
         ('🔴 防缩页闸不过：还剩 %d 段超长 nowrap（宽过 %g 字），Chrome 会把整卷缩印。'
          '首段：%s…' % (len(bad), NB_LIMIT_EM, bad[0][:60]))
     cards = _CARD_RE.findall(html)
+    # 🔴 首页走廊闸：开了密封线的卷，卡里必须恰有一个 .sealgap 浮动占位。
+    #    少了它 = 第 1 页正文直接压在密封线上（浮动没了就没人让路），而 PDF 照样出、
+    #    退出码照样 0 —— 只有印出来才看得见。闸盯住这条，摘掉 `_seal` 里那个 div 立刻红。
+    for ci, seg in enumerate(cards):
+        n_bar, n_gap = seg.count('class="sealbar"'), seg.count('class="sealgap"')
+        assert n_bar == n_gap, \
+            ('🔴 首页走廊闸：第%d卷 %d 条密封线却有 %d 个走廊占位（.sealgap）——'
+             '正文会压在密封线上' % (ci + 1, n_bar, n_gap))
     assert len(cards) == len(days), \
         '🔴 题号连号闸：HTML 里 %d 张卷，数据里 %d 张' % (len(cards), len(days))
     for ci, seg in enumerate(cards):

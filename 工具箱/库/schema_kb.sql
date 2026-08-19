@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS kp (
   ord       INTEGER,                       -- 同级排序（编号只在结构列，不进名字）
   status    TEXT NOT NULL CHECK(status IN ('现行','未铺','退役')),
   note      TEXT,
+  -- 对齐-001（2026-08-19 用户裁决）：考点携带教研属性，与题目属性同构；值空置待人工/判据定标。
+  -- desc=考法描述（吸收讲义题型信息，对齐-003）。存量库补列走 工具箱/kg/apply_对齐001_003.py。
+  emphasis  TEXT CHECK(emphasis IN ('重点','难点','重难点','常规')),
+  freq      TEXT CHECK(freq IN ('高频','中频','低频')),
+  diff_code TEXT,
+  desc      TEXT,
   UNIQUE (parent_id, name)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_kp_root_name ON kp(name) WHERE parent_id IS NULL;
@@ -79,9 +85,15 @@ CREATE TABLE IF NOT EXISTS asset (
 CREATE TABLE IF NOT EXISTS question_pattern (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
-  kp_ids_json TEXT NOT NULL,               -- 🔴 锚考点多值（模型可能考多个考点）
+  kp_ids_json TEXT NOT NULL,               -- 🔴 锚考点多值（模型可能考多个考点）；'[]'=待挂（人审跟踪）
   desc        TEXT,
-  status      TEXT NOT NULL CHECK(status IN ('在用','停用'))
+  status      TEXT NOT NULL CHECK(status IN ('在用','停用')),
+  -- 题型簇教研属性（2026-08-19 用户拍板：与考点平行、成簇状、带重难点/频率/难度；存量库补列见文末）
+  emphasis    TEXT CHECK(emphasis IN ('重点','难点','重难点','常规')),
+  freq        TEXT CHECK(freq IN ('高频','中频','低频')),
+  diff_code   TEXT,
+  note        TEXT,                        -- 出处注记 {"讲义":"讲二题型4"}
+  created_at  TEXT
 );
 
 -- ---------------------------------------------------------------------
@@ -466,3 +478,16 @@ CREATE TABLE IF NOT EXISTS punch_map (
 
 -- artifact 补售卖态人工列（apply_ddl_263.py 幂等执行）：
 -- ALTER TABLE artifact ADD COLUMN sale_state TEXT CHECK(sale_state IN ('在售','待整理','停售'));
+
+-- ---------------------------------------------------------------------
+-- question_pattern 扩列 —— 题型簇教研属性（2026-08-19 用户拍板；正本=认知/题型簇口径草案.md）
+-- 🔴 单名制纪律现场执法：题型簇=既有 question_pattern 表本尊，不另建 pattern（同物两名坑，
+--   2026-08-19 差点犯，当场纠正）。与考点平行：题型挂 1..n 叶（kp_ids_json），题挂题型
+--   （question.pattern_id → question_pattern.id 早已留位）。
+-- 🔴 emphasis/freq/diff_code 是教研属性（内容不是学情），初值空置待人工/判据定标，LLM 只匹配不自评。
+-- ALTER 非幂等，存量库补列走 pragma 探测（已于 2026-08-19 主位执行）：
+--   ALTER TABLE question_pattern ADD COLUMN emphasis  TEXT CHECK(emphasis IN ('重点','难点','重难点','常规'));
+--   ALTER TABLE question_pattern ADD COLUMN freq      TEXT CHECK(freq IN ('高频','中频','低频'));
+--   ALTER TABLE question_pattern ADD COLUMN diff_code TEXT;
+--   ALTER TABLE question_pattern ADD COLUMN note      TEXT;   -- 出处注记 {"讲义":"讲二题型4"} + 待挂原因
+--   ALTER TABLE question_pattern ADD COLUMN created_at TEXT;

@@ -97,9 +97,11 @@
   消灭每册手写编排脚本的损耗）③知识库先坚实、每日打卡与举一反三**挂起**，确认后再走）：
   - [x] 11a 语意层地基：question_vec DDL 主位执行 + D-20 落地口径进正本（本地 bge sidecar 零外部 API，
     venv 已建 工具箱/检索/.venv，模型复用 punch-console/embed/models 184M）+ 闸④ promote 前置闸进 gates
-  - [ ] 11b DSL 批处理入库 dsl_batch（GEN_META 注册表下沉 qbank；排班.json→生成→verify→规律打标→
-    批量入库→组卷 spec/--assemble 一条命令；exam_model 缺档整体拒跑）
-  - [ ] 11c 入库闸补全：D-21 等级审矩阵实装（复杂度×源机械判级，L0/L1 直入、L2/L3 自动开 review_ticket，
-    promote 接闸④先审后上架）+ 工单原语 tickets/ticket-done
-  - [ ] 11d 取用方式：D-20 三层（query_core 确定性查询核②八维倒排+①精确过滤；find_questions CLI；
-    paper_tool.take 复用同核；读 API 扩参；③语意=embed_tool build/query 本地 bge sidecar）
+  - [x] 11b DSL 批处理入库 dsl_batch（一条命令零 LLM：预检模型留档→出题→verify→规律打标→入库→组卷；
+    沙盘 16 题端到端+缺模型拒跑+坏答案拒入全验；--check-only 全回滚）
+  - [x] 11c 入库闸补全：D-21 等级审实装（机械判级 L0~L3、scan+1、L2/L3 自动开图审工单、--skip-review 显式跳过）
+    + 工单原语 tickets/ticket-done + 闸④扩「已驳回也拦」并接进 ingest promote 与 paper_tool finalize 两条通路；
+    gates_test 14+31 / ingest_flow_test 19 全绿
+  - [x] 11d 取用方式：D-20 三层全落（query_core 八维 56/56 断言、11 条拒查不静默；find_questions CLI；
+    take 同核复用差额话术不变；API 扩参 13/13；语意层本地 bge 实测行程题置顶分差明显；
+    修 sidecar stdin GBK 真坑）；全套五测复跑全绿后合并（d680909）

@@ -5,7 +5,11 @@
   ①出题必回流：blocks v2 + 血缘（mother_qid/variant_op/prov）+ 考点叶子 + source_kind；
   ②过三闸才算出完：块流校验器 + 执行阀五条 + 考点叶子闸（gates.py，违例拒收不静默）；
   ③出题前必查库：本通路兜底做相似前查（match_key 撞库→拒，除非 --allow-dup）；
-  ④每次执行落 skill_log。
+  ④每次执行落 skill_log；
+  ⑤**入库收尾自动补语意向量**（PRD-003 阶段4）：新题进库后立刻算 question_vec——
+    常驻 serve(:4315) 在就走它（毫秒级），不在回落冷载 sidecar，venv/serve 都不在就
+    **打印待补命令**。🔴 无论哪种失败都**不阻断入库**（题已过闸进库，向量只是③层检索加速）。
+    不想算：--no-vec。
 
 🔴 D-21 等级审矩阵（正本=认知/数据结构.md §2.7 / 业务流程.md §四）——本文件是它的实装点，逐题纯机械判定：
 
@@ -34,7 +38,7 @@
      不塞进 prov_json/anchor_json（那两处各有其义，混进去=字段一物两名，老区血案）。
 
 用法：
-  python ingest_flow.py ingest 题目包.json [--partial] [--allow-dup] [--skip-review]
+  python ingest_flow.py ingest 题目包.json [--partial] [--allow-dup] [--skip-review] [--no-vec]
   python ingest_flow.py promote --ids q2026...,q2026...   # 草稿→上架（进入交付才可见，D-9；过闸④）
   python ingest_flow.py promote --match 前缀%             # 按 id LIKE 批量
   python ingest_flow.py check 题目包.json                  # 只过闸不入库（干跑，含等级预判）
@@ -208,6 +212,75 @@ def open_review_ticket(conn, qid, grade):
         'INSERT INTO review_ticket(kind,ref,status,note,created_at) VALUES (?,?,?,?,?)',
         ('图审', qid, '待处理', note, now()))
     return cur.lastrowid
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 入库收尾：增量向量（D-20 第③层跟着入库走，不用人记着补）
+# ══════════════════════════════════════════════════════════════════════
+VEC_HINT = ('  补：python 工具箱\\检索\\embed_tool.py build --db <本次的库>'
+            '（只补缺的）\n  想快先起常驻 serve：python 工具箱\\启动台.py')
+
+
+def autovec(conn, qids, serve_port=None):
+    """给刚入库的这批题补语意向量（增量）→ (算了几题, 一句说明)。
+
+    🔴 三条：
+      · **绝不阻断入库**：题已经过闸进库了，向量只是③层的检索加速。算不动就**打印待补命令**、
+        照常返回，退出码不受影响（收尾步骤把主事务拖下水是老区最典型的坏账来源）；
+      · 常驻 serve（:4315）在 → 走 serve，毫秒级；不在 → 回落冷载 sidecar；
+        **venv 与 serve 都不在 → 只打印待补命令**，一行报警说清楚，不静默；
+      · 纯图题（题面无 text 块）如实列出跳过，绝不塞空向量充数。
+    """
+    if not qids:
+        return 0, '无新题'
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '检索'))
+        import embed_tool                                  # noqa: PLC0415 —— 故意懒加载
+    except Exception as e:                                 # noqa: BLE001
+        print(f'⚠️ 增量向量跳过（检索模块加载失败：{type(e).__name__}: {e}）——题已入库，不受影响\n'
+              + VEC_HINT)
+        return 0, 'skip:import'
+    rows = conn.execute(
+        'SELECT id, blocks_json FROM question WHERE id IN (%s)' % ','.join('?' * len(qids)),
+        list(qids)).fetchall()
+    keys, texts, empty = [], [], []
+    for qid, bj in rows:
+        t = embed_tool.plain_text(bj)
+        if not t:
+            empty.append(qid)
+            continue
+        keys.append(qid)
+        texts.append(t)
+    if empty:
+        print(f'⚠️ 增量向量：{len(empty)} 题无正文块（纯图题？）如实跳过，不塞空向量：{empty[:5]}')
+    if not keys:
+        return 0, 'skip:no-text'
+
+    h = embed_tool.serve_health(serve_port)
+    if h:
+        via = f'常驻 serve :{embed_tool.serve_port_of(serve_port)}（pid={h.get("pid")}，毫秒级）'
+    else:
+        try:
+            embed_tool.resolve_venv(None)
+            via = '冷载 sidecar（serve 没起，每批多花 5~6s；起：python 工具箱\\启动台.py）'
+        except embed_tool.EmbedError as e:
+            print(f'⚠️ 增量向量跳过：常驻 serve 不在、venv 也不可用——{str(e).splitlines()[0]}\n'
+                  f'  🔴 题已入库不受影响，只是③语意层暂时搜不到这 {len(keys)} 题。\n' + VEC_HINT)
+            return 0, 'skip:no-venv'
+    print(f'增量向量：{len(keys)} 题 走{via}')
+    done = 0
+    try:
+        for i in range(0, len(keys), embed_tool.CHUNK):
+            chunk = keys[i:i + embed_tool.CHUNK]
+            vecs, dim, model = embed_tool.embed_texts(texts[i:i + embed_tool.CHUNK],
+                                                      quiet=True, serve_port=serve_port)
+            done += embed_tool.save_vecs(conn, list(zip(chunk, vecs)), model, dim)
+    except Exception as e:                                 # noqa: BLE001
+        print(f'⚠️ 增量向量没算完（{type(e).__name__}: {e}）——已算 {done}/{len(keys)} 题，'
+              f'🔴 题已入库不受影响。\n' + VEC_HINT)
+        return done, f'partial:{done}/{len(keys)}'
+    print(f'  ✓ 向量入库 {done}/{len(keys)} 题（模型 {model} dim={dim}）')
+    return done, f'{done}/{len(keys)}'
 
 
 def dict_code(conn, domain, label):
@@ -425,8 +498,19 @@ def cmd_ingest(conn, args, dry=False):
             print('⚠️ --partial：过闸的已入，拒收的如上——别当没看见')
     elif all_errs and not args.partial and not dry:
         print('🔴 全批回滚（默认全或无；要部分入加 --partial）')
+
+    # ── 收尾：增量向量（③语意层跟着入库走）🔴 算不动只打印待补命令，绝不阻断入库 ──
+    vec_note = 'off'
+    if ok_ids and not dry and not rolled_back:
+        if getattr(args, 'no_vec', False):
+            print('· --no-vec：不算增量向量（③语意层搜不到这批，直到你手动 build）')
+            vec_note = 'skip:--no-vec'
+        else:
+            _n, vec_note = autovec(conn, ok_ids, getattr(args, 'serve_port', None))
+
     detail = (f'ok={len(ok_ids)}/{len(items)} rej={len(all_errs)} '
-              f'等级[{dist_txt}] 工单={n_ticket}' + ('（--skip-review 跳过审核）' if skip_review else ''))
+              f'等级[{dist_txt}] 工单={n_ticket} 向量[{vec_note}]'
+              + ('（--skip-review 跳过审核）' if skip_review else ''))
     return f'pack={args.pack}', detail, 0 if not all_errs else 1
 
 
@@ -529,6 +613,11 @@ def main():
         s.add_argument('--allow-dup', action='store_true', help='match_key 撞库仍放行（变式同题面时显式用）')
         s.add_argument('--skip-review', action='store_true',
                        help='🔴 用户明说跳过审核：L2/L3 不开工单（执行阀④口径），报告里大字标明')
+        s.add_argument('--no-vec', dest='no_vec', action='store_true',
+                       help='入库后不算增量向量（缺省会算：serve 在走 serve，不在回落冷载；'
+                            '算不动只打印待补命令，不阻断入库）')
+        s.add_argument('--serve-port', dest='serve_port', type=int,
+                       help='常驻 embed serve 端口（缺省 4315／环境变量 EMBED_SERVE_PORT）')
     s = sub.add_parser('promote')
     s.add_argument('--ids'); s.add_argument('--match')
     s = sub.add_parser('tickets')

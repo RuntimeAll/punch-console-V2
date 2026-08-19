@@ -5,11 +5,24 @@
  *   ① **只读**：连接一律 SQLITE_OPEN_READONLY（node:sqlite 的 readOnly:true），
  *      写语句在驱动层就被拒（实测报 "attempt to write a readonly database"）。
  *      页面一个写按钮都不许有，写动作全走 工具箱/ 脚本与 skill。
+ *      🔴 **唯一豁免**（PRD-003，2026-08-19 用户拍板）：`POST /api/kb/sale-state`——
+ *      全站唯一写端点，只许写 `artifact.sale_state` 一列（人工售卖态）。
+ *      豁免由 `WRITE_ROUTES` 白名单持有，长度硬断言=1；为什么必须留这一个口，
+ *      见 epSetSaleState 头上原样搬来的 punch-console 血案注释。
  *   ② **薄**：只做「取数 + 拼形状 + 贴中文标签」，不做业务判断、不落任何缓存表。
  *      口径正本在 认知/数据结构.md，本文件是它的只读投影。
  *   ③ **全参数化**：一切外部输入进 SQL 一律走 ? 占位；唯一的字符串拼接是
  *      /api/kb/stats 的表名——它来自 sqlite_master（库自己的名字，不是用户输入），
  *      且做了双引号转义。
+ *      🔴 **占位符挡得住引号，挡不住通配符**：凡把用户输入拼进 LIKE 模式串的地方
+ *      （epMaterials 的 q= 关键词、resolveKp 的考点名模糊），一律 `likeEsc()` 转义
+ *      `% _ \` 再配 `ESCAPE '\'`——否则 q=`%` 等于"全表匹配"、q=`_` 等于"任意一字符"，
+ *      页面就会把「查不到」显示成「全都有」（与本文件到处在防的那件事同源）。
+ *
+ * 端点账（🔴 改口子必须同步改这三处：ROUTES/WRITE_ROUTES、下面的 EP_READ/EP_WRITE 常量、
+ *   404 的 endpoints 清单——数量对不上服务直接起不来，见文件末尾自检闸）：
+ *   **10 条 = 9 读 + 1 写**。其中 PRD-003 在原有 7 读的底子上 **+2 读**
+ *   （GET /api/kb/materials、GET /api/kb/artifact-members）**+1 写**（POST /api/kb/sale-state）。
  *
  * 依赖：Node 内置 node:sqlite（本机 node v24.11.1 起可用）。
  *   🔴 不许换 better-sqlite3：这台机器有原生模块编译失败史（punch-console 的 pnpm dev 至今被它拦）。
@@ -44,11 +57,25 @@ function openRo() {
   return new DatabaseSync(DB_PATH, { readOnly: true })
 }
 
+/** 🔴 全站唯一的可写句柄。只有 epSetSaleState 调它，别的地方多调一次都算破了「页面只读」。 */
+function openRw() {
+  return new DatabaseSync(DB_PATH)
+}
+
 // ── 小工具 ──────────────────────────────────────────────────────────────
 const all = (db, sql, ...p) => db.prepare(sql).all(...p)
 const one = (db, sql, ...p) => db.prepare(sql).get(...p)
 /** IN (?,?,?) 占位串 */
 const marks = (n) => Array.from({ length: n }, () => '?').join(',')
+
+/**
+ * 🔴 LIKE 模式转义：把用户输入里的 `%` `_` `\` 变成字面量。
+ * 必须与 SQL 里的 `LIKE ? ESCAPE '\'`（= 常量 LIKE_ESC）成对出现，少一半就等于没转。
+ * 反例（转义前的真实行为）：q=`%` 命中全表、q=`_` 命中任意单字符——把"查不到"演成"全都有"。
+ */
+const likeEsc = (s) => String(s).replace(/[\\%_]/g, '\\$&')
+/** 拼进 SQL 的 ESCAPE 子句（JS 里 '\\' 落到 SQL 就是一个反斜杠） */
+const LIKE_ESC = "ESCAPE '\\'"
 
 /** 块流 JSON 安全解析：坏数据**如实报**，绝不静默变空块流（老区"静默丢"血案） */
 function parseDoc(raw) {
@@ -176,7 +203,12 @@ function resolveKp(db, word) {
     hit = one(db, 'SELECT id, name, level, status FROM kp WHERE id = ?', a.kp_id)
     if (hit) return { ...hit, matched_by: `别名(${a.alias_kind || '未标来源'})` }
   }
-  hit = one(db, 'SELECT id, name, level, status FROM kp WHERE name LIKE ? ORDER BY LENGTH(name) LIMIT 1', `%${w}%`)
+  // 🔴 模糊这一档才是 LIKE：用户输入里的 % _ 必须转义（否则 kp=`_` 会"模糊"到随便哪个考点上）
+  hit = one(
+    db,
+    `SELECT id, name, level, status FROM kp WHERE name LIKE ? ${LIKE_ESC} ORDER BY LENGTH(name) LIMIT 1`,
+    `%${likeEsc(w)}%`,
+  )
   if (hit) return { ...hit, matched_by: '考点名模糊' }
   return null
 }
@@ -245,6 +277,8 @@ function kpPath(db, kpId) {
 function epStats(db) {
   const tables = all(
     db,
+    // 全文件仅此一处 LIKE 不转义：模式串是写死的字面量 'sqlite_%'（要的就是它的通配语义），
+    // 没有任何用户输入拼进来。其余 LIKE 一律 likeEsc + LIKE_ESC。
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
   )
   const rows = tables.map((t) => ({
@@ -494,14 +528,75 @@ function parseJson(raw) {
   }
 }
 
+/**
+ * 网盘提取码：从 note（JSON 或纯文本）与 link（`?pwd=`）里**解析**，不猜。
+ * 🔴 三条口径：
+ *   ① 三个来源都取，取到几个就列几个（candidates），**互相不一致时 conflict=true 原样端出去**——
+ *      页面必须显示"这册的提取码对不上"，而不是挑一个显示（老区"静默择一"就是这么把错码发给客户的）。
+ *   ② 一个都没有 ⇒ code=null / source=null，页面显示"—"；绝不从链接里瞎猜四位。
+ *   ③ 优先序 note.提取码 > link 的 pwd > note 纯文本正则——note 是宣发字段定稿位（数据结构 §2.6c）。
+ */
+function panCode(note, link) {
+  const cands = []
+  const push = (code, source) => {
+    const c = String(code ?? '').trim()
+    if (c) cands.push({ code: c, source })
+  }
+  // ① note 是 JSON 对象时取 提取码 / pan_code 键
+  if (note) {
+    const raw = String(note).trim()
+    if (raw.startsWith('{')) {
+      try {
+        const o = JSON.parse(raw)
+        if (o && typeof o === 'object') push(o['提取码'] ?? o.pan_code, 'note.提取码')
+      } catch {
+        /* note 不是合法 JSON：正常（纯文本备注），交给 ③ */
+      }
+    }
+  }
+  // ② 链接自带 pwd 参数（百度网盘 `?pwd=xxxx` 是现行主流形态）
+  if (link) {
+    const m = /[?&]pwd=([0-9A-Za-z]{3,8})/.exec(String(link))
+    if (m) push(m[1], 'link.pwd')
+  }
+  // ③ note 纯文本里写着「提取码：xxxx」
+  if (note) {
+    const m = /提取码\s*[:：]?\s*([0-9A-Za-z]{3,8})/.exec(String(note))
+    if (m) push(m[1], 'note 文本')
+  }
+  if (!cands.length) return { code: null, source: null, candidates: [], conflict: false }
+  const distinct = [...new Set(cands.map((c) => c.code))]
+  return {
+    code: cands[0].code,
+    source: cands[0].source,
+    candidates: cands,
+    conflict: distinct.length > 1, // 🔴 冲突如实报，页面必须显眼标出来
+  }
+}
+
+/** note 解析成对象（不是 JSON 就原样当文本回，绝不吞） */
+function noteObj(note) {
+  if (note === null || note === undefined || note === '') return null
+  const raw = String(note).trim()
+  if (!raw.startsWith('{')) return { _text: raw }
+  try {
+    const o = JSON.parse(raw)
+    return o && typeof o === 'object' ? o : { _text: raw }
+  } catch {
+    return { _text: raw, parse_error: 'note 以 { 开头但不是合法 JSON' }
+  }
+}
+
 function epArtifacts(db) {
   const rows = all(
     db,
-    `SELECT a.id, a.name, a.kind, a.status, a.source_line, a.template_id,
+    `SELECT a.id, a.name, a.kind, a.status, a.sale_state, a.source_line, a.template_id,
             a.kp_ids_json, a.delivered_at, a.link, a.note, a.created_at,
             (SELECT COUNT(*) FROM paper p WHERE p.artifact_id = a.id) AS paper_count,
             (SELECT COUNT(*) FROM paper_item pi JOIN paper p2 ON p2.id = pi.paper_id
-              WHERE p2.artifact_id = a.id) AS item_count
+              WHERE p2.artifact_id = a.id) AS item_count,
+            (SELECT COUNT(*) FROM material m WHERE m.artifact_id = a.id) AS material_count,
+            (SELECT COUNT(*) FROM artifact_member am WHERE am.parent_id = a.id) AS member_count
      FROM artifact a
      ORDER BY a.created_at DESC, a.id`,
   )
@@ -510,6 +605,7 @@ function epArtifacts(db) {
     rows: rows.map((r) => ({
       ...r,
       kp_ids: r.kp_ids_json ? parseJson(r.kp_ids_json) : [],
+      pan_code: panCode(r.note, r.link),
       files: null,
     })),
   }
@@ -548,11 +644,322 @@ function epArtifactDetail(db, id) {
       stem: it.blocks_json ? stemBrief(it.blocks_json, 80) : '🔴 题已不在库（断链）',
     })),
   }))
+  // ── PRD-003 补吐：售卖态 / 网盘链接+提取码 / 合刊关系 / 物料概览 ──
+  const members = all(
+    db,
+    `SELECT am.member_id, am.ord, a2.name, a2.kind, a2.status, a2.sale_state
+     FROM artifact_member am LEFT JOIN artifact a2 ON a2.id = am.member_id
+     WHERE am.parent_id = ? ORDER BY am.ord, am.member_id`,
+    id,
+  ).map((m) => ({
+    id: m.member_id,
+    ord: m.ord,
+    name: m.name ?? null,
+    kind: m.kind ?? null,
+    status: m.status ?? null,
+    sale_state: m.sale_state ?? null,
+    missing: m.name === null || m.name === undefined, // 🔴 断链如实标，不当成"没有成员"
+  }))
+  const memberOf = all(
+    db,
+    `SELECT am.parent_id, am.ord, a2.name FROM artifact_member am
+     LEFT JOIN artifact a2 ON a2.id = am.parent_id
+     WHERE am.member_id = ? ORDER BY am.parent_id`,
+    id,
+  ).map((p) => ({ id: p.parent_id, ord: p.ord, name: p.name ?? null, missing: p.name == null }))
+
+  const mstat = all(
+    db,
+    `SELECT account, COUNT(*) AS c, SUM(is_active) AS act, SUM(burned) AS burned
+     FROM material WHERE artifact_id = ? GROUP BY account ORDER BY account`,
+    id,
+  )
+
   return {
     ...a,
     kp_ids: a.kp_ids_json ? parseJson(a.kp_ids_json) : [],
     files: a.files_json ? parseJson(a.files_json) : null,
+    // sale_state 由 `...a` 原样带出（人工列，本 API 只读它；改它走 POST /api/kb/sale-state）
+    note_obj: noteObj(a.note),
+    pan_code: panCode(a.note, a.link),
+    members, // 本册作为合刊时的成员（doc_member 吃进来的）
+    member_of: memberOf, // 本册被哪些合刊收编
+    material_stat: mstat.map((m) => ({
+      account: m.account,
+      total: m.c,
+      active: m.act ?? 0,
+      burned: m.burned ?? 0,
+    })),
     papers: out,
+  }
+}
+
+// ── PRD-003 发布运营域端点 ────────────────────────────────────────────────
+
+/**
+ * 物料清单（小红书文案等）。artifact_id 不给=全库；给了但库里没这册 ⇒
+ * artifact_unresolved 原样回 + 0 条，🔴 不静默当"全部"。
+ */
+function epMaterials(db, q) {
+  const where = []
+  const args = []
+  let art = null
+  let artMiss = null
+
+  const aid = q.get('artifact_id')
+  if (aid) {
+    art = one(db, 'SELECT id, name, kind, status, sale_state, link, note FROM artifact WHERE id = ?', aid)
+    if (art) {
+      where.push('m.artifact_id = ?')
+      args.push(aid)
+    } else {
+      artMiss = aid
+      where.push('1 = 0')
+    }
+  }
+  const acc = q.getAll('account').filter(Boolean) // A / B，多值=OR
+  const badAcc = acc.filter((v) => v !== 'A' && v !== 'B')
+  if (acc.length) {
+    if (badAcc.length) where.push('1 = 0') // 🔴 值域外的账号名不当"不过滤"
+    else {
+      where.push(`m.account IN (${marks(acc.length)})`)
+      args.push(...acc)
+    }
+  }
+  const flag = (name, col) => {
+    const raw = q.get(name)
+    if (raw === null || raw === '') return null
+    const on = !/^(0|false|no|否)$/i.test(raw)
+    where.push(`${col} = ?`)
+    args.push(on ? 1 : 0)
+    return on
+  }
+  const active = flag('active', 'm.is_active')
+  const burned = flag('burned', 'm.burned')
+
+  // 顶部「在售态」筛选：过滤的是**册的人工列**，不是物料自己的属性
+  const sale = q.getAll('sale_state').filter(Boolean)
+  const NULL_WORDS = ['未标', 'null', '空']
+  const badSale = sale.filter((s) => !SALE_STATES.has(s) && !NULL_WORDS.includes(s))
+  if (sale.length) {
+    if (badSale.length) {
+      where.push('1 = 0') // 🔴 值域外的态名不当"不过滤"
+    } else {
+      const real = sale.filter((s) => !NULL_WORDS.includes(s))
+      const seg = []
+      if (real.length) {
+        seg.push(`a.sale_state IN (${marks(real.length)})`)
+        args.push(...real)
+      }
+      if (sale.length > real.length) seg.push('a.sale_state IS NULL')
+      where.push(`(${seg.join(' OR ')})`)
+    }
+  }
+  const kw = (q.get('q') || '').trim()
+  if (kw) {
+    // 🔴 关键词是纯用户输入：转义 % _ \ 并带 ESCAPE，q=`%` 只该匹配含百分号的文案，不是整库
+    where.push(`(m.title LIKE ? ${LIKE_ESC} OR m.body LIKE ? ${LIKE_ESC} OR a.name LIKE ? ${LIKE_ESC})`)
+    const pat = `%${likeEsc(kw)}%`
+    args.push(pat, pat, pat)
+  }
+
+  const sql = where.length ? ` WHERE ${where.join(' AND ')}` : ''
+  const rows = all(
+    db,
+    `SELECT m.id, m.artifact_id, m.account, m.is_active, m.title, m.body, m.topics_json,
+            m.style_seed, m.burned, m.product_desc, m.pan_share_text, m.created_at,
+            a.name AS artifact_name, a.kind AS artifact_kind, a.status AS artifact_status,
+            a.sale_state AS artifact_sale_state, a.link AS artifact_link, a.note AS artifact_note,
+            (SELECT COUNT(*) FROM publish_log pl WHERE pl.material_id = m.id) AS publish_count,
+            (SELECT MAX(published_on) FROM publish_log pl2 WHERE pl2.material_id = m.id) AS last_published_on
+     FROM material m LEFT JOIN artifact a ON a.id = m.artifact_id${sql}
+     ORDER BY a.name, m.account, m.is_active DESC, m.created_at DESC, m.id`,
+    ...args,
+  )
+
+  // ⚙️ 启用版唯一闸的**读侧告警**：同 册+账号 出现两条 is_active=1 就是坏账，页面必须看得见
+  const dup = all(
+    db,
+    `SELECT m.artifact_id, a.name AS artifact_name, m.account, COUNT(*) AS active_count
+     FROM material m LEFT JOIN artifact a ON a.id = m.artifact_id
+     WHERE m.is_active = 1 GROUP BY m.artifact_id, m.account HAVING COUNT(*) > 1`,
+  )
+
+  const acct = { A: 0, B: 0 }
+  for (const r of rows) if (r.account in acct) acct[r.account] += 1
+
+  return {
+    total: rows.length,
+    artifact: art
+      ? { id: art.id, name: art.name, kind: art.kind, status: art.status, sale_state: art.sale_state,
+          link: art.link, pan_code: panCode(art.note, art.link) }
+      : null,
+    artifact_unresolved: artMiss, // 🔴 这个册 id 库里没有，页面照实说
+    account_unknown: badAcc.length ? badAcc : null, // account 只有 A/B 两个值，别的词照实回
+    sale_state_unknown: badSale.length ? badSale : null, // 同上：售卖态值域外的词照实回
+    account_total: acct,
+    burned_total: rows.filter((r) => r.burned).length,
+    active_dup: dup, // 空数组=闸绿
+    filters: {
+      artifact_id: aid || null,
+      account: acc,
+      active,
+      burned,
+      sale_state: sale,
+      q: kw || null,
+    },
+    rows: rows.map((r) => ({
+      id: r.id,
+      artifact_id: r.artifact_id,
+      artifact_name: r.artifact_name ?? null,
+      artifact_kind: r.artifact_kind ?? null,
+      artifact_status: r.artifact_status ?? null,
+      artifact_sale_state: r.artifact_sale_state ?? null,
+      artifact_missing: r.artifact_name == null, // 物料挂了个不存在的册=断链，如实标
+      account: r.account,
+      is_active: !!r.is_active,
+      burned: !!r.burned, // 已发过=烧掉，页面灰显
+      title: r.title,
+      body: r.body, // 全文出（一键复制要的就是全文，不截断）
+      topics: r.topics_json ? parseJson(r.topics_json) : [],
+      style_seed: r.style_seed,
+      product_desc: r.product_desc,
+      pan_share_text: r.pan_share_text,
+      pan_code: panCode(r.artifact_note, r.artifact_link),
+      publish_count: r.publish_count,
+      last_published_on: r.last_published_on,
+      created_at: r.created_at,
+    })),
+  }
+}
+
+/** 合刊关系（吃自 doc_member）。?parent_id= 只看某合刊；?member_id= 反查某册被谁收编。 */
+function epArtifactMembers(db, q) {
+  const where = []
+  const args = []
+  const pid = q.get('parent_id')
+  const mid = q.get('member_id')
+  if (pid) {
+    where.push('am.parent_id = ?')
+    args.push(pid)
+  }
+  if (mid) {
+    where.push('am.member_id = ?')
+    args.push(mid)
+  }
+  const sql = where.length ? ` WHERE ${where.join(' AND ')}` : ''
+  const rows = all(
+    db,
+    `SELECT am.parent_id, am.member_id, am.ord,
+            p.name AS parent_name, p.kind AS parent_kind, p.status AS parent_status,
+            p.sale_state AS parent_sale_state,
+            c.name AS member_name, c.kind AS member_kind, c.status AS member_status,
+            c.sale_state AS member_sale_state
+     FROM artifact_member am
+     LEFT JOIN artifact p ON p.id = am.parent_id
+     LEFT JOIN artifact c ON c.id = am.member_id${sql}
+     ORDER BY p.name, am.ord, am.member_id`,
+    ...args,
+  )
+  const byParent = new Map()
+  for (const r of rows) {
+    if (!byParent.has(r.parent_id)) {
+      byParent.set(r.parent_id, {
+        parent_id: r.parent_id,
+        parent_name: r.parent_name ?? null,
+        parent_kind: r.parent_kind ?? null,
+        parent_status: r.parent_status ?? null,
+        parent_sale_state: r.parent_sale_state ?? null,
+        parent_missing: r.parent_name == null,
+        members: [],
+      })
+    }
+    byParent.get(r.parent_id).members.push({
+      id: r.member_id,
+      ord: r.ord,
+      name: r.member_name ?? null,
+      kind: r.member_kind ?? null,
+      status: r.member_status ?? null,
+      sale_state: r.member_sale_state ?? null,
+      missing: r.member_name == null, // 🔴 指向不存在的册=断链
+    })
+  }
+  const groups = [...byParent.values()]
+  return {
+    pair_total: rows.length,
+    parent_total: groups.length,
+    broken_total: rows.filter((r) => r.parent_name == null || r.member_name == null).length,
+    filters: { parent_id: pid || null, member_id: mid || null },
+    rows: groups,
+  }
+}
+
+// ── 🔴 全站唯一写端点 ────────────────────────────────────────────────────
+/**
+ * 改一本资料的**售卖态 sale_state**（`在售` / `待整理` / `停售` / 清空）。
+ *
+ * ┌─ 以下血案注释原样搬自 punch-console `web/src/app/api/doc-state/route.ts`
+ * │  （PRD-003 吃库并入 v2，注释随口径一起搬——这条闸的理由不能在搬家路上丢了）
+ * │
+ * │ 🔴🔴 为什么必须是"人点一下"而不是产线自动置：
+ * │    2026-08-10 实伤 —— 11 条管线四盏灯刚转绿，就被顺手 `UPDATE 人工态='在售'`。
+ * │    可用户**根本还没发布过**。「能发」不等于「已发」，中间隔着一次人工动作
+ * │    （去小红书发帖、挂商品），那件事机器做不了也不该替人宣布做完了。
+ * │    用户原话：「我还没发布呢？你不要自己联想状态」。
+ * │    ⇒ 这个接口存在的意义就是把那次动作**留给人**，产线侧任何代码都不许调它。
+ * │
+ * │ 🔴 只允许写 `人工态` 这一列。其余列各有各的事实源：
+ * │    题/物料/图由产线重跑覆盖，网盘链接由物料 md 带进来 —— 从界面改会被下次 import 抹掉。
+ * │
+ * │ 🔴 人工态是**产线不碰的人工列**（`import-all.ts` 的 `upsertDoc(..., 保留人工列=true)`
+ * │    set 白名单里没有 manualState），所以这里写进去的值重跑导入不会被冲掉。
+ * └─────────────────────────────────────────────────────────────────────
+ *
+ * v2 落点差异（口径不变，只是搬了家）：
+ *   · 列名 `人工态` → `artifact.sale_state`（数据结构 §2.6c；🔴 与产线机器列 status 两物两名不合并）；
+ *   · id 是 **字符串**不是整数（v2 铁律：id 全链路字符串，绝不 Number() 一下再进 SQL）；
+ *   · 「产线不碰」在 v2 由 工具箱/挂账/artifact_tool.py 的 set 白名单守（它不写 sale_state）。
+ */
+const SALE_STATES = new Set(['在售', '待整理', '停售'])
+
+function epSetSaleState(body) {
+  let payload
+  try {
+    payload = JSON.parse(body || '')
+  } catch {
+    return { code: 400, data: { ok: false, error: '请求体不是 JSON' } }
+  }
+  const id = payload?.id
+  if (typeof id !== 'string' || !id.trim()) {
+    // 🔴 不接受数字 id：给了数字就是调用方还带着老区/punch-console 的整数 id 习惯，宁可报错
+    return { code: 400, data: { ok: false, error: 'id 必须是非空字符串（v2 铁律：id 全链路字符串）' } }
+  }
+  const raw = Object.prototype.hasOwnProperty.call(payload, 'sale_state') ? payload.sale_state : undefined
+  if (raw === undefined) {
+    return { code: 400, data: { ok: false, error: '缺 sale_state 字段（清空请显式给 null）' } }
+  }
+  // null / "" / "清空" 都表示清空这一列
+  const next = raw === null || raw === '' || raw === '清空' ? null : String(raw)
+  if (next !== null && !SALE_STATES.has(next)) {
+    return {
+      code: 400,
+      data: { ok: false, error: `sale_state 只能是 ${[...SALE_STATES].join(' / ')} 或空`, got: next },
+    }
+  }
+
+  const db = openRw()
+  try {
+    const prev = one(db, 'SELECT id, name, sale_state FROM artifact WHERE id = ?', id.trim())
+    if (!prev) return { code: 404, data: { ok: false, error: '没有这本资料', id } }
+    // 🔴 这是本文件唯一一条写语句，且列名写死在字面量里——多写一列都要过 code review
+    db.prepare('UPDATE artifact SET sale_state = ? WHERE id = ?').run(next, id.trim())
+    return { code: 200, data: { ok: true, id: prev.id, name: prev.name, from: prev.sale_state, to: next } }
+  } finally {
+    try {
+      db.close()
+    } catch {
+      /* 关不上就算了，进程退出会回收 */
+    }
   }
 }
 
@@ -603,9 +1010,17 @@ const ROUTES = [
   { re: /^\/api\/kb\/questions$/, run: (db, _m, q) => epQuestions(db, q) },
   { re: /^\/api\/kb\/questions\/(.+)$/, run: (db, m) => epQuestionDetail(db, decodeURIComponent(m[1])) },
   { re: /^\/api\/kb\/artifacts$/, run: (db) => epArtifacts(db) },
+  { re: /^\/api\/kb\/artifact-members$/, run: (db, _m, q) => epArtifactMembers(db, q) },
   { re: /^\/api\/kb\/artifacts\/(.+)$/, run: (db, m) => epArtifactDetail(db, decodeURIComponent(m[1])) },
+  { re: /^\/api\/kb\/materials$/, run: (db, _m, q) => epMaterials(db, q) },
   { re: /^\/api\/kb\/papers\/(.+)$/, run: (db, m) => epPaperDetail(db, decodeURIComponent(m[1])) },
 ]
+
+/**
+ * 🔴 写端点白名单——全站就这一条，长度硬断言在文件末尾。
+ * 想再加一条写口 = 先回 认知/数据结构.md 改「页面只读」正本，改完再回来动这个数组。
+ */
+const WRITE_ROUTES = [{ method: 'POST', path: '/api/kb/sale-state', run: epSetSaleState }]
 
 function send(res, code, obj) {
   const body = Buffer.from(JSON.stringify(obj, null, 2), 'utf8')
@@ -625,13 +1040,50 @@ const server = createServer((req, res) => {
     return send(res, 400, { error: '请求路径非法' })
   }
   if (req.method !== 'GET') {
-    // 🔴 只读 API：非 GET 一律拒（写动作归 agent/工具，页面无写口）
-    return send(res, 405, { error: '本 API 只读，只接受 GET' })
+    // 🔴 只读 API：非 GET 一律拒，唯一豁免=白名单里那一条写端点（改 artifact.sale_state 一列）
+    const w = WRITE_ROUTES.find((x) => x.method === req.method && x.path === url.pathname)
+    if (!w) {
+      return send(res, 405, {
+        error: '本 API 只读，只接受 GET',
+        写端点: WRITE_ROUTES.map((x) => `${x.method} ${x.path}`),
+      })
+    }
+    const chunks = []
+    let size = 0
+    let tooBig = false
+    req.on('error', () => {
+      /* 连接被掐断（多半是下面这条 destroy 自己干的），不算服务出错 */
+    })
+    req.on('data', (c) => {
+      if (tooBig) return
+      size += c.length
+      if (size > 64 * 1024) {
+        // 写端点只吃一个 {id, sale_state}，超 64KB 必是打错门了——先回话再断，别让对方干等
+        tooBig = true
+        send(res, 413, { ok: false, error: '请求体过大（本端点只接受一个小 JSON）' })
+        req.destroy()
+        return
+      }
+      chunks.push(c)
+    })
+    req.on('end', () => {
+      if (tooBig) return
+      try {
+        const out = w.run(Buffer.concat(chunks).toString('utf8'))
+        send(res, out.code, out.data)
+      } catch (e) {
+        console.error(`[kb-read-api] ${url.pathname} 写出错：${e.message}`)
+        send(res, 500, { ok: false, error: String(e.message) })
+      }
+    })
+    return
   }
   const hit = ROUTES.map((r) => ({ r, m: r.re.exec(url.pathname) })).find((x) => x.m)
   if (!hit) {
     return send(res, 404, {
       error: '无此端点',
+      // 🔴 数字现算不手写（自报端点数曾经报错过：说 11 实为 10）
+      端点合计: `${ROUTES.length} 读 + ${WRITE_ROUTES.length} 写 = ${ROUTES.length + WRITE_ROUTES.length}`,
       endpoints: [
         'GET /api/kb/stats',
         'GET /api/kb/kg/tree',
@@ -640,8 +1092,12 @@ const server = createServer((req, res) => {
           'tag 写「域:名」或「名」；unused=1 未进过卷 / unused=0 进过卷）',
         'GET /api/kb/questions/:id',
         'GET /api/kb/artifacts',
-        'GET /api/kb/artifacts/:id',
+        'GET /api/kb/artifacts/:id（含 sale_state / link / 解析出的 pan_code / 合刊 members）',
+        'GET /api/kb/artifact-members?parent_id=&member_id=（合刊关系）',
+        'GET /api/kb/materials?artifact_id=&account=A|B&active=&burned=&sale_state=&q=' +
+          '（sale_state 可写「未标」查未标册；account 可重复给=OR）',
         'GET /api/kb/papers/:id',
+        '🔴 POST /api/kb/sale-state {id, sale_state}（全站唯一写端点，只写 artifact.sale_state 一列）',
       ],
     })
   }
@@ -667,6 +1123,55 @@ if (!existsSync(DB_PATH)) {
   console.error(`🔴 库不存在：${DB_PATH}\n   （worktree 里先跑 python 工具箱/库/init_db.py --only kb 建沙盘库）`)
   process.exit(2)
 }
+// 🔴 起服务前的自检闸①：全站写端点必须恰好 1 条，且只能是 sale-state；读端点数必须与
+// 文件头「端点账」对得上。靠闸不靠注释——有人偷偷 push 第二条写口 / 加个口不改账，服务直接起不来。
+const EP_READ = 9 // 原 7 读 + PRD-003 的 materials、artifact-members
+const EP_WRITE = 1 // 全站唯一写口 sale-state
+if (WRITE_ROUTES.length !== EP_WRITE || WRITE_ROUTES[0].path !== '/api/kb/sale-state') {
+  console.error(`🔴 写端点白名单被改了（现有 ${WRITE_ROUTES.length} 条）：页面只读原则=全站唯一写端点 sale-state`)
+  process.exit(3)
+}
+if (ROUTES.length !== EP_READ) {
+  console.error(
+    `🔴 端点账对不上：ROUTES 实有 ${ROUTES.length} 读，文件头「端点账」写的是 ${EP_READ} 读。\n` +
+      `   加口/删口请同步改：文件头端点账、EP_READ、404 的 endpoints 清单、console/README.md`,
+  )
+  process.exit(3)
+}
+// 🔴 起服务前的自检闸②：artifact 必须有 sale_state 列（PRD-003 的售卖态人工列）。
+// 缺列 = 这个库没跑过 263 号 DDL，artifacts / artifacts/:id / materials / sale-state
+// 四个口会在运行期齐刷刷 500（no such column: a.sale_state）。
+// 宁可起不来也不许"静默起来等着 500"——报错要直接给出修法。
+{
+  let cols
+  try {
+    const probe = openRo()
+    try {
+      cols = probe.prepare('PRAGMA table_info(artifact)').all().map((c) => c.name)
+    } finally {
+      probe.close()
+    }
+  } catch (e) {
+    console.error(`🔴 库打不开：${DB_PATH}（${e.message}）`)
+    process.exit(4)
+  }
+  if (!cols.length) {
+    console.error(`🔴 库里没有 artifact 表：${DB_PATH}\n   跑 python 工具箱/库/init_db.py --only kb 建库`)
+    process.exit(4)
+  }
+  if (!cols.includes('sale_state')) {
+    console.error(
+      `🔴 artifact 表缺 sale_state 列（PRD-003 售卖态人工列），` +
+        `/api/kb/artifacts、/api/kb/artifacts/:id、/api/kb/materials、POST /api/kb/sale-state 四个口会 500。\n` +
+        `   跑 python 工具箱/库/apply_ddl_263.py ${DB_PATH}`,
+    )
+    process.exit(4)
+  }
+}
 server.listen(PORT, HOST, () => {
-  console.log(`kb 读 API :${PORT} 库=${DB_PATH} 只读`)
+  console.log(
+    `kb 读 API :${PORT} 库=${DB_PATH} 只读` +
+      `（端点 ${ROUTES.length} 读 + ${WRITE_ROUTES.length} 写 = ${ROUTES.length + WRITE_ROUTES.length}，` +
+      `唯一写口 POST /api/kb/sale-state）`,
+  )
 })

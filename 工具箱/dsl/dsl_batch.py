@@ -8,8 +8,12 @@ agent 不再为每册手写一份编排脚本（老做法：每册一个 gen_打
 
 用法（--db 缺省 = 脚本位置自解析 <v2根>/知识库/kb.db；worktree 里跑 = 天然沙盘）：
     python 工具箱/dsl/dsl_batch.py run 排班.json [--db …] [--check-only] [--assemble]
+                                                [--no-vec] [--serve-port 4315]
       --check-only  只干跑（生成+verify+模型解析+过三闸），全程回滚、不写库不写 spec
       --assemble    入库后直接调 工具箱/组卷/paper_tool.py assemble 把册组出来
+      --no-vec      入库后不补语意向量（缺省会补：serve 在走 serve、不在回落冷载、
+                    两条都不通只打印待补命令——绝不静默、绝不阻断入库）
+      --serve-port  常驻 embed serve 端口（缺省 4315／环境变量 EMBED_SERVE_PORT）
 每次执行落 skill_log（skill='DSL批处理'）。
 
 排班.json（🔴 数据不是代码——「每册手写 gen 脚本」到此为止）：
@@ -40,6 +44,10 @@ agent 不再为每册手写一份编排脚本（老做法：每册一个 gen_打
   4. 入库：走 ingest_flow.ingest_one 过三闸，全或无（一条拒收全批回滚），拿回 qids。
   5. 组卷 spec：qids 已回填、layout 由 layout_defaults + 节名合成 → 写 `<排班名>-组卷spec.json`；
      --assemble 时接着跑 paper_tool assemble。
+  6. 收尾：增量语意向量（**与 ingest_flow 同一个 autovec，同款行为**）——D-20 第③层跟着入库走，
+     不用人记着补。🔴 serve 在 → 批量走 serve（毫秒级）；serve 不在 → 回落冷载 sidecar；
+     两条都不通 → **打印待补命令**（python 工具箱/检索/embed_tool.py build --db …）后照常返回。
+     🔴 绝不静默（每条路都印一行）、🔴 绝不阻断入库（题已过闸进库了，向量算不动不影响退出码）。
 """
 import argparse
 import importlib
@@ -427,6 +435,40 @@ def make_spec(plan, slices, qids, plan_path):
 
 
 # ══════════════════════════════════════════════════════════════════════
+# 入库收尾：增量语意向量（🔴 ingest_flow.autovec 同款，一处口径两处用）
+# ══════════════════════════════════════════════════════════════════════
+def do_autovec(conn, args, qids):
+    """给这批刚入库的题补语意向量 → 说明串（写进汇总与 skill_log）。
+
+    🔴 本函数存在的理由（2026-08-19 审查实锤）：dsl_batch 直调 ingest_one，绕过了
+       ingest_flow 的 cmd_ingest 收尾，于是「打卡册 16 题入库、③语意层一条向量都没有、
+       且屏幕上一个字都不提」——静默缺口比算不出来更坏。
+
+    三条与 ingest_flow 一字不差：
+      · serve（缺省 :4315）在 → 批量走 serve；不在 → 回落冷载 sidecar；两条都不通 → 打印待补命令；
+      · **绝不静默**：走哪条路、跳过什么原因，都印出来；
+      · **绝不阻断入库**：题已过闸进库并 commit 了，向量是③层加速；这里任何异常都只报不抛。
+    """
+    if not qids:
+        return '无新题'
+    if getattr(args, 'no_vec', False):
+        print('· --no-vec：不补语意向量（③语意层搜不到这批，直到你手动 build）\n'
+              f'  待补：python 工具箱\\检索\\embed_tool.py build --db {args.db}')
+        return 'skip:--no-vec'
+    try:
+        _n, note = ing.autovec(conn, qids, getattr(args, 'serve_port', None))
+    except Exception as e:                                  # noqa: BLE001
+        # 🔴 收尾步骤绝不把主事务拖下水：题已入库并 commit，这里只报不抛（老区最典型的坏账来源）
+        print(f'⚠️ 增量向量收尾异常（{type(e).__name__}: {e}）——🔴 题已入库不受影响。\n'
+              f'  待补：python 工具箱\\检索\\embed_tool.py build --db {args.db}', file=sys.stderr)
+        return f'error:{type(e).__name__}'
+    if note.startswith('skip:') or note.startswith('partial:'):
+        # autovec 内部已印过原因与 build 提示，这里再把本次的库路径补全（它只印通用命令）
+        print(f'  待补（本次的库）：python 工具箱\\检索\\embed_tool.py build --db {args.db}')
+    return note
+
+
+# ══════════════════════════════════════════════════════════════════════
 # run
 # ══════════════════════════════════════════════════════════════════════
 def cmd_run(conn, args):
@@ -457,13 +499,18 @@ def cmd_run(conn, args):
     qids, grades = ingest(conn, items, dry=args.check_only)
 
     spec_path = None
+    vec_note = 'off'
     if args.check_only:
         would = Path(args.plan).resolve().with_name(Path(args.plan).stem + '-组卷spec.json')
         print(f'干跑：{len(qids)}/{len(items)} 过三闸，全部回滚（真跑去掉 --check-only）；'
               f'组卷 spec 将写到 {would}')
+        vec_note = 'skip:--check-only'
     else:
         spec_path = make_spec(plan, slices, qids, args.plan)
         print(f'入库（草稿）：{len(qids)} 题；组卷 spec → {spec_path}')
+        # ── 收尾：增量语意向量（🔴 与 ingest_flow 同一个 autovec，一处口径两处用）──
+        #    绝不静默：serve/冷载/待补命令三条路各印一行；绝不阻断：算不动不影响入库与退出码。
+        vec_note = do_autovec(conn, args, qids)
 
     # ── 汇总 ──
     cov, lvs = {}, {}
@@ -482,6 +529,7 @@ def cmd_run(conn, args):
     print('  难度分布：' + ' '.join(f'{k}×{v}' for k, v in sorted(lvs.items())))
     print('  审级分布（D-21，ingest_flow 判）：'
           + (' '.join(f'{k}×{v}' for k, v in sorted(grades.items())) or '（无）'))
+    print(f'  语意向量（D-20 第③层）：{vec_note}')
     if qids:
         head = ' '.join(qids[:2])
         tail = ' '.join(qids[-2:])
@@ -489,7 +537,7 @@ def cmd_run(conn, args):
     print(f'  组卷 spec：{spec_path if spec_path else "(干跑未写)"}')
     return (f'plan={args.plan} dsl={plan["dsl"]}',
             f'papers={len(plan["papers"])} items={len(flat)} qids={len(qids)} '
-            f'check_only={bool(args.check_only)}', spec_path)
+            f'check_only={bool(args.check_only)} 向量[{vec_note}]', spec_path)
 
 
 def run_assemble(spec_path, db):
@@ -515,6 +563,11 @@ def main(argv=None):
     s.add_argument('--check-only', dest='check_only', action='store_true',
                    help='只干跑：生成+verify+模型解析+过三闸，全程回滚不写库不写 spec')
     s.add_argument('--assemble', action='store_true', help='入库后直接调 paper_tool assemble')
+    s.add_argument('--no-vec', dest='no_vec', action='store_true',
+                   help='入库后不补语意向量（缺省会补：serve 在走 serve，不在回落冷载；'
+                        '两条都不通只打印待补命令，不阻断入库）')
+    s.add_argument('--serve-port', dest='serve_port', type=int,
+                   help='常驻 embed serve 端口（缺省 4315／环境变量 EMBED_SERVE_PORT）')
     args = ap.parse_args(argv)
 
     t0 = time.time()

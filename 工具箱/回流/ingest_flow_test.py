@@ -114,8 +114,11 @@ def run_pack(conn, tmpdir, it, skip_review):
     pack = Path(tmpdir) / f'pack_{it["id"]}.json'
     pack.write_text(json.dumps({'source_line': '沙盘', 'items': [it]}, ensure_ascii=False),
                     encoding='utf-8')
+    # no_vec=True：本套自证的是 D-21 等级审与工单，跟语意向量无关；开着的话每条用例都要
+    # 冷载一次 bge（十几秒 × 十几条），把一套 1 秒的测试拖成几分钟。
+    # 🔴 入库收尾增量向量的正主自证在 工具箱/检索/serve_test.py（走 serve / 冷载 / 都不在 三态全测）。
     args = argparse.Namespace(pack=str(pack), partial=False, allow_dup=False,
-                              skip_review=skip_review)
+                              skip_review=skip_review, no_vec=True, serve_port=None)
     buf = io.StringIO()
     with redirect_stdout(buf):
         _, _, code = F.cmd_ingest(conn, args, dry=False)

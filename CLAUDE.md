@@ -31,16 +31,16 @@
 | `console/` | 展示台代码（React19+antd5+Vite，:4300） | 挂账+展示+终审，页面只读写归 agent |
 | `工具箱/` | 生产工具代码：切割器/渲染链/DSL/验算闸/KG 工具 | 代码空间只放代码 |
 | `.claude/skills/` | v2 skill hub（编制表=其 README） | 每次执行落 skill_log（D-15） |
-| `punch-console/` | 发布物料中控台（:3000，Next.js+SQLite）——🔴 **独立 git 仓**（origin=RuntimeAll/punch-console.git），整体平移自老区、不重构 | 库=`知识库/资料库.db`（PUNCH_DB env）；起法见 §5；不并入 v2 仓 |
+| `punch-console/` | 🔴 **冻结只读参考·待退役**（2026-08-19 PRD-003 用户拍板并入 v2）：功能归 console/，数据吃进 kb.db；`知识库/资料库.db` 吃完冻结为历史存档永久只读；:3000 不再起 | 代码/仓/库零变更；embed 模型权重（embed/models）继续复用 |
 | `试验场/` | POC/战役目录（带日期） | 用完挪归档 |
-| `开发位/` | git worktree 停车场 | 见 §2 |
+| `codeplace/` | git worktree 停车场（2026-08-19 用户定名，替代旧 `开发位/`） | 见 §2 |
 | `password/` | 凭据 | 🔴 永不入 git |
 | `归档/` | 完结战役收纳 | 只查不写 |
 
 ## 2. 🔴 开发模式：单仓 + worktree + 主位常驻运行
 
 - **主位（本目录）= 唯一运行位**：master 分支；:4300 展示台、watcher、两库、产物都只活在主位。
-- **并行开发按需开位**：`git worktree add 开发位\wt-<线名> -b dev/<线名>`——一个独立 session 领一个位；
+- **并行开发按需开位**：`git worktree add codeplace\wt-<线名> -b dev/<线名>`——一个独立 session 领一个位；
   完成合回 master 即收位 `git worktree remove`。不养空位。
 - **三条硬纪律**：
   1. worktree 里**绝不碰主位的两库**（SQLite 单写者，双写必坏账）；动库结构在自己位里用**副本库**沙盘，
@@ -75,8 +75,7 @@ cd D:\workplace\ai-bkb-v2\console; pnpm exec vite --port 4300 --strictPort --hos
 # 🔴 必须显式 --host 127.0.0.1（默认只绑 ::1 连不上）；build 自证 = pnpm build（tsc -b && vite build）
 # 探活（本机有代理必须 --noproxy）
 curl.exe -s -o NUL -w "%{http_code}" --noproxy "*" http://127.0.0.1:4300/
-# 发布物料中控台 :3000（punch-console）——🔴 pnpm dev 会被依赖体检拦（better-sqlite3 装失败遗留），用 node 直启：
-#   cd punch-console\web; $env:PUNCH_DB='D:\workplace\ai-bkb-v2\知识库\资料库.db'; node node_modules\next\dist\bin\next dev
+# （punch-console :3000 已冻结待退役——PRD-003 并入 v2，不再起服务；资料库.db 只读存档）
 # Chrome 截图/出 PDF（撞正开着的 Chrome 会静默不写文件）
 # --headless=new --disable-gpu --no-proxy-server --user-data-dir=<临时profile>，截完 sleep 再验文件存在
 ```
@@ -90,6 +89,6 @@ curl.exe -s -o NUL -w "%{http_code}" --noproxy "*" http://127.0.0.1:4300/
 
 ```
 你在 D:\workplace\ai-bkb-v2 领一张卡独立完成。先读根 CLAUDE.md 与卡（prd/PRD-NNN-*/PRD.md），照卡执行不越界。
-开工先领 worktree：git worktree add 开发位\wt-<线名> -b dev/<线名>，只在自己位里干活；
+开工先领 worktree：git worktree add codeplace\wt-<线名> -b dev/<线名>，只在自己位里干活；
 主位两库与运行态绝不碰；完成合回 master 并收位才算完结；拿不准的标低置信写进报告，不停下等人。
 ```

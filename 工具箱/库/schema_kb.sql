@@ -413,3 +413,54 @@ CREATE TABLE IF NOT EXISTS question_vec (
   vec         BLOB NOT NULL,               -- float32 小端连续
   updated_at  TEXT
 );
+
+-- ---------------------------------------------------------------------
+-- 发布运营域 —— material / publish_log / artifact_member / punch_map
+-- （PRD-003 资料库合并吃库 · 2026-08-19；数据结构 §2.6c）
+-- 🔴 sale_state（售卖态·人工列）≠ status（生产态·产线写）——两物两名不合并；
+--    产线任何代码不许写 sale_state（punch-console 2026-08-10 血案原样继承：能发≠已发）。
+-- ALTER 非幂等，执行走 工具箱/库/apply_ddl_263.py（pragma 探测后补列）。
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS material (
+  id             TEXT PRIMARY KEY,
+  artifact_id    TEXT NOT NULL REFERENCES artifact(id),
+  account        TEXT NOT NULL CHECK(account IN ('A','B')),
+  is_active      INTEGER NOT NULL DEFAULT 1,
+  title          TEXT NOT NULL,
+  body           TEXT NOT NULL,
+  topics_json    TEXT,
+  style_seed     TEXT,
+  burned         INTEGER NOT NULL DEFAULT 0,
+  product_desc   TEXT,
+  pan_share_text TEXT,
+  created_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_material_artifact ON material(artifact_id, account, is_active);
+
+CREATE TABLE IF NOT EXISTS publish_log (
+  id           INTEGER PRIMARY KEY,
+  material_id  TEXT NOT NULL REFERENCES material(id),
+  published_on TEXT,
+  result       TEXT,
+  note         TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_publish_log_material ON publish_log(material_id);
+
+CREATE TABLE IF NOT EXISTS artifact_member (
+  parent_id TEXT NOT NULL REFERENCES artifact(id),
+  member_id TEXT NOT NULL REFERENCES artifact(id),
+  ord       INTEGER,
+  PRIMARY KEY (parent_id, member_id)
+);
+
+CREATE TABLE IF NOT EXISTS punch_map (
+  kind      TEXT NOT NULL CHECK(kind IN ('doc','material','question','asset')),
+  punch_id  TEXT NOT NULL,
+  kb_id     TEXT NOT NULL,
+  note      TEXT,
+  created_at TEXT,
+  PRIMARY KEY (kind, punch_id)
+);
+
+-- artifact 补售卖态人工列（apply_ddl_263.py 幂等执行）：
+-- ALTER TABLE artifact ADD COLUMN sale_state TEXT CHECK(sale_state IN ('在售','待整理','停售'));

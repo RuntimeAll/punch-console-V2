@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""三闸拒错自证：临时库 + 合法/非法用例各若干，跑完打印通过表。
+"""四闸拒错自证：临时库 + 合法/非法用例各若干，跑完打印通过表。
+（闸①块流 / 闸②考点叶子 / 闸③入库执行阀五条 / 闸④ promote 前置——D-21 等级审的出口）
 
     python 工具箱\\库\\gates_test.py
 
@@ -15,7 +16,8 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from gates import validate_blocks, assert_leaf_kp, execution_valve, LeafKpError  # noqa: E402
+from gates import (validate_blocks, assert_leaf_kp, execution_valve,  # noqa: E402
+                   assert_promotable, LeafKpError, GateError)
 
 SQL_DIR = Path(__file__).resolve().parent
 
@@ -165,6 +167,44 @@ def run_valve(conn, rows_out):
     return ok_all
 
 
+def run_promotable(conn, rows_out):
+    """闸④ promote 前置：挂待处理工单 ⇒ 拒上架；工单结掉 ⇒ 放行（D-21 等级审的出口）。"""
+    stem = json.dumps({'v': 2, 'rows': [{'cells': [{'type': 'text', 'md': '占位题面。'}]}]},
+                      ensure_ascii=False)
+    for qid in ('qP_clean', 'qP_done', 'qP_open', 'qP_rej'):
+        conn.execute(
+            'INSERT INTO question(id,blocks_json,source_kind,status,created_at,updated_at) '
+            "VALUES (?,?,?,'草稿','2026-08-19','2026-08-19')", (qid, stem, 'manual'))
+    conn.executemany(
+        'INSERT INTO review_ticket(kind,ref,status,note,created_at,done_at) VALUES (?,?,?,?,?,?)',
+        [('图审', 'qP_done', '已处理', 'L2·速审｜已人审通过', '2026-08-19', '2026-08-19'),
+         ('图审', 'qP_open', '待处理', 'L2·速审｜机械判定：2 图', '2026-08-19', None),
+         ('图审', 'qP_rej', '已驳回', 'L3·细审｜图缺失，打回重录', '2026-08-19', '2026-08-19')])
+    conn.commit()
+
+    ok_all = True
+    legal = [('L1 无工单', 'qP_clean'), ('L2 工单已处理', 'qP_done')]
+    illegal = [('X1 挂待处理工单', 'qP_open'),
+               ('X2 挂已驳回工单', 'qP_rej')]
+    for name, qid in legal:
+        try:
+            assert_promotable(conn, qid)
+            ok, detail = True, '过（可上架）'
+        except GateError as e:
+            ok, detail = False, '❌拒:' + str(e)[:60]
+        ok_all &= ok
+        rows_out.append(('闸④上架', name, '过', detail, ok))
+    for name, qid in illegal:
+        try:
+            assert_promotable(conn, qid)
+            ok, detail = False, '❌过了'
+        except GateError as e:
+            ok, detail = True, '拒:' + str(e)[:66]
+        ok_all &= ok
+        rows_out.append(('闸④上架', name, '拒', detail, ok))
+    return ok_all
+
+
 def main():
     rows = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -173,6 +213,7 @@ def main():
             ok1 = run_blocks(rows)
             ok2 = run_leaf(conn, rows)
             ok3 = run_valve(conn, rows)
+            ok4 = run_promotable(conn, rows)
         finally:
             conn.close()
 
@@ -187,7 +228,8 @@ def main():
     passed_legal = sum(1 for r in rows if r[2] == '过' and r[4])
     passed_illegal = sum(1 for r in rows if r[2] == '拒' and r[4])
     print(f'合法用例 {passed_legal}/{n_legal} 通过　|　非法用例 {passed_illegal}/{n_illegal} 被拒')
-    green = ok1 and ok2 and ok3 and passed_legal == n_legal and passed_illegal == n_illegal
+    green = (ok1 and ok2 and ok3 and ok4
+             and passed_legal == n_legal and passed_illegal == n_illegal)
     print('结论：' + ('🟢 全绿（合法全过、非法全拒）' if green else '🔴 有用例不符，闸不成立'))
     print('=' * 108)
     return 0 if green else 1

@@ -7,11 +7,39 @@
   ③出题前必查库：本通路兜底做相似前查（match_key 撞库→拒，除非 --allow-dup）；
   ④每次执行落 skill_log。
 
+🔴 D-21 等级审矩阵（正本=认知/数据结构.md §2.7 / 业务流程.md §四）——本文件是它的实装点，逐题纯机械判定：
+
+  复杂度（只看题面 blocks，不问 LLM、不看人脸色）           基准等级
+    纯 text（0 图 0 表）                                    L0 直入
+    恰 1 个 figure                                          L1 抽检
+    ≥2 个 figure，或含 table                                L2 速审
+    题面 text 总字数 > 600 且 figure ≥ 2                     L3 细审
+
+  源（question.source_kind）
+    manual / model / pipeline = 文字层基准，不加级
+    🔴 scan（拍照/扫描）一律 +1 级——OCR 无守恒基准，天然多一分不确定；封顶 L3
+
+  行为
+    L0        直入草稿，不留待办
+    L1        直入草稿，报告与 skill_log 标「L1·抽检」（抽检=人有空时抽着看，不拦上架）
+    L2 / L3   题照样入草稿，但**自动开 review_ticket(kind='图审', ref=qid, status='待处理')**，
+              note 写明等级与机械判定原因；「先审后上架」由 gates.assert_promotable（闸④）在
+              promote 处兜底——工单没处理完，题就上不了架，不许静默跳。
+    --skip-review   显式旗标 = 用户明说跳过审核（执行阀第④条的既有口径，同时喂给
+                    execution_valve 的 review_skipped_by_user）：L2/L3 不开工单，
+                    但报告里大字标明「这批没走等级审」，风险落在用户身上，不静默。
+
+  🔴 裁量留痕：question 表没有 gates_json 列（那列在 ingest_item 上，本轻通路不开批次），
+     所以逐题等级落在**报告 + skill_log.detail（等级分布）+ L2/L3 的工单 note**三处，
+     不塞进 prov_json/anchor_json（那两处各有其义，混进去=字段一物两名，老区血案）。
+
 用法：
-  python ingest_flow.py ingest 题目包.json [--partial] [--allow-dup]
-  python ingest_flow.py promote --ids q2026...,q2026...   # 草稿→上架（进入交付才可见，D-9）
+  python ingest_flow.py ingest 题目包.json [--partial] [--allow-dup] [--skip-review]
+  python ingest_flow.py promote --ids q2026...,q2026...   # 草稿→上架（进入交付才可见，D-9；过闸④）
   python ingest_flow.py promote --match 前缀%             # 按 id LIKE 批量
-  python ingest_flow.py check 题目包.json                  # 只过闸不入库（干跑）
+  python ingest_flow.py check 题目包.json                  # 只过闸不入库（干跑，含等级预判）
+  python ingest_flow.py tickets [--status 待处理|已处理|已驳回|全部]     # 列审核工单
+  python ingest_flow.py ticket-done --id 7 [--note 结论] [--reject]     # 待处理→已处理/已驳回
 
 题目包格式（一册/一批一文件）：
 {
@@ -45,7 +73,8 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '库'))
-from gates import execution_valve, assert_leaf_kp, LeafKpError  # noqa: E402
+from gates import (execution_valve, assert_leaf_kp, assert_promotable,  # noqa: E402
+                   LeafKpError, GateError)
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / '知识库' / 'kb.db'
@@ -98,6 +127,89 @@ def match_key_of(blocks):
     return canon[:40] + '#' + hashlib.sha1(canon.encode('utf-8')).hexdigest()[:8]
 
 
+# ══════════════════════════════════════════════════════════════════════
+# D-21 等级审矩阵（复杂度 × 源）——纯机械判定，逐题
+# ══════════════════════════════════════════════════════════════════════
+LEVEL_NAME = {0: 'L0·直入', 1: 'L1·抽检', 2: 'L2·速审', 3: 'L3·细审'}
+LONG_TEXT = 600          # 「超长题」阈值（题面 text 去空白后的字数）
+TICKET_FROM = 2          # ≥ 该等级自动开 review_ticket（L2/L3 = 速审/细审）
+SCAN_BUMP_KINDS = ('scan',)   # 🔴 拍照/扫描源整体 +1 级（OCR 无守恒基准）
+
+
+def _scan_stem(blocks):
+    """机械扫题面：返回 (figure 数, 是否含表, text 净字数)。option/table 内的块一并计。"""
+    n_fig = 0
+    has_table = False
+    texts = []
+
+    def walk(cells):
+        nonlocal n_fig, has_table
+        for c in cells:
+            if not isinstance(c, dict):
+                continue
+            t = c.get('type')
+            if t == 'text':
+                texts.append(str(c.get('md') or ''))
+            elif t == 'figure':
+                n_fig += 1
+            elif t == 'option':
+                walk(c.get('blocks') or [])
+            elif t == 'table':
+                has_table = True
+                # 表体不计入「正文字数」（表属结构不属题干正文），但表格内的图要数
+                for trow in c.get('rows') or []:
+                    if isinstance(trow, list):
+                        for tcell in trow:
+                            if isinstance(tcell, list):
+                                walk(tcell)
+
+    rows = blocks.get('rows') if isinstance(blocks, dict) else None
+    for row in rows or []:
+        walk((row or {}).get('cells') or [])
+    canon = re.sub(r'\s+', '', unicodedata.normalize('NFKC', ''.join(texts)))
+    return n_fig, has_table, len(canon)
+
+
+def grade_item(blocks, source_kind):
+    """D-21 等级审：复杂度×源 → 等级。返回 dict（level/base/reason/…），不抛异常。
+
+    复杂度：纯 text→L0；恰 1 图→L1；≥2 图 或 含表→L2；正文>600 字 且 ≥2 图→L3。
+    源：scan +1 级（封顶 L3）；manual/model/pipeline = 文字层基准。
+    """
+    n_fig, has_table, n_chars = _scan_stem(blocks)
+    if n_fig >= 2 and n_chars > LONG_TEXT:
+        base, why = 3, f'超长题（正文 {n_chars} 字 > {LONG_TEXT}）+ {n_fig} 图'
+    elif n_fig >= 2:
+        base, why = 2, f'{n_fig} 图（正文 {n_chars} 字）'
+    elif has_table:
+        base, why = 2, f'含表格（{n_fig} 图，正文 {n_chars} 字）'
+    elif n_fig == 1:
+        base, why = 1, f'恰 1 图（正文 {n_chars} 字）'
+    else:
+        base, why = 0, f'纯文本（正文 {n_chars} 字）'
+
+    bumped = source_kind in SCAN_BUMP_KINDS
+    level = min(3, base + 1) if bumped else base
+    src_why = (f'源={source_kind}（拍照/扫描 +1 级' + ('，已封顶 L3' if base + 1 > 3 else '') + '）'
+               if bumped else f'源={source_kind or "?"}（文字层基准）')
+    return {
+        'level': level, 'base': base, 'bumped': bumped,
+        'n_fig': n_fig, 'has_table': has_table, 'n_chars': n_chars,
+        'name': LEVEL_NAME[level],
+        'reason': f'{why}｜{src_why}',
+        'need_ticket': level >= TICKET_FROM,
+    }
+
+
+def open_review_ticket(conn, qid, grade):
+    """L2/L3 自动开图审工单（先审后上架的入口；出口=gates.assert_promotable）。"""
+    note = f'{grade["name"]}｜机械判定：{grade["reason"]}｜等级审矩阵 D-21，先审后上架'
+    cur = conn.execute(
+        'INSERT INTO review_ticket(kind,ref,status,note,created_at) VALUES (?,?,?,?,?)',
+        ('图审', qid, '待处理', note, now()))
+    return cur.lastrowid
+
+
 def dict_code(conn, domain, label):
     """中文标签→字典码；翻不出→如实报 None（调用侧决定拒）。已是码值则原样回。"""
     if not label:
@@ -147,12 +259,17 @@ def ensure_tag(conn, domain, name):
     return tid
 
 
-def ingest_one(conn, item, idx, allow_dup):
-    """单题回流。返回 (qid, None) 或 (None, 错误清单)。"""
+def ingest_one(conn, item, idx, allow_dup, skip_review=False):
+    """单题回流。返回 (qid, 错误清单|None, 等级 dict|None)。
+
+    等级审在闸前先算（拒收的题也报等级，便于人看这批到底难在哪），
+    工单只在真入库之后开（不给不存在的 qid 挂工单）。
+    """
     errs = []
     blocks = item.get('blocks')
     if not isinstance(blocks, dict):
-        return None, [f'items[{idx}] 缺 blocks（题面块流 v2）']
+        return None, [f'items[{idx}] 缺 blocks（题面块流 v2）'], None
+    grade = grade_item(blocks, item.get('source_kind'))
 
     # 考点 resolve（先做：执行阀要吃叶子 id）
     kp_words = item.get('kp') or []
@@ -199,7 +316,8 @@ def ingest_one(conn, item, idx, allow_dup):
         'kp_ids': kp_ids,
         'primary_kp': primary_id,
         'reviewed': item.get('reviewed'),
-        'review_skipped_by_user': item.get('review_skipped_by_user'),
+        # --skip-review = 用户明说跳过审核，正是执行阀④「或用户明确说跳过审核才免」的口径
+        'review_skipped_by_user': item.get('review_skipped_by_user') or skip_review,
     }
     ok, results = execution_valve(valve_item, conn)
     if not ok:
@@ -214,11 +332,11 @@ def ingest_one(conn, item, idx, allow_dup):
             errs.append(f'items[{idx}] 相似前查撞库：match_key 与 {dup[0]} 相同——重复出题（--allow-dup 才放行）')
 
     if errs:
-        return None, errs
+        return None, errs, grade
 
     qid = item.get('id') or f'q{datetime.now().strftime("%Y%m%d")}{uuid.uuid4().hex[:8]}'
     if conn.execute('SELECT 1 FROM question WHERE id=?', (qid,)).fetchone():
-        return None, [f'items[{idx}] id={qid} 已存在——不静默覆盖']
+        return None, [f'items[{idx}] id={qid} 已存在——不静默覆盖'], grade
 
     conn.execute(
         'INSERT INTO question(id,blocks_json,answer_blocks_json,analysis_blocks_json,'
@@ -240,7 +358,11 @@ def ingest_one(conn, item, idx, allow_dup):
     for tg in item.get('tags') or []:
         tid = ensure_tag(conn, tg['domain'], tg['name'])
         conn.execute('INSERT OR IGNORE INTO question_tag(question_id,tag_id) VALUES (?,?)', (qid, tid))
-    return qid, None
+
+    # 🔴 D-21：L2/L3 题照样进草稿，但挂一张待处理图审工单——上架由闸④卡住
+    if grade['need_ticket'] and not skip_review:
+        grade['ticket_id'] = open_review_ticket(conn, qid, grade)
+    return qid, None, grade
 
 
 def cmd_ingest(conn, args, dry=False):
@@ -248,18 +370,50 @@ def cmd_ingest(conn, args, dry=False):
     items = pack.get('items') or []
     if not items:
         sys.exit('🔴 题目包 items 为空')
-    ok_ids, all_errs = [], []
+    skip_review = bool(getattr(args, 'skip_review', False))
+    ok_ids, all_errs, graded = [], [], []
     conn.execute('BEGIN')
     for i, item in enumerate(items):
-        qid, errs = ingest_one(conn, item, i, args.allow_dup)
+        qid, errs, grade = ingest_one(conn, item, i, args.allow_dup, skip_review)
+        graded.append((i, qid, grade, bool(errs)))
         if errs:
             all_errs += errs
         else:
             ok_ids.append(qid)
-    if dry or (all_errs and not args.partial):
+    rolled_back = dry or (all_errs and not args.partial)
+    if rolled_back:
         conn.rollback()
     else:
         conn.commit()
+
+    # ── D-21 等级审：逐题一行 ────────────────────────────────────────
+    print('等级审（D-21 复杂度×源，纯机械判定）：')
+    dist, n_ticket, skipped = {}, 0, []
+    for i, qid, grade, rejected in graded:
+        if grade is None:
+            print(f'  · items[{i}] —          （无 blocks，判不了等级）')
+            continue
+        dist[grade['level']] = dist.get(grade['level'], 0) + 1
+        mark = ''
+        if grade['need_ticket']:
+            if skip_review:
+                skipped.append(qid or f'items[{i}]')
+                mark = ' → 🔴 --skip-review：未开工单'
+            elif rejected:
+                mark = ' → 该题被闸拒收，未开工单'
+            elif rolled_back:
+                mark = ' → 全批回滚，工单同批撤销'
+            elif grade.get('ticket_id'):
+                mark = f' → 已开工单 #{grade["ticket_id"]}（图审·待处理）'
+                n_ticket += 1
+        elif grade['level'] == 1:
+            mark = ' → 抽检（不拦上架）'
+        print(f'  · items[{i}] {qid or "—":<18} {grade["name"]:<8}{grade["reason"]}{mark}')
+    dist_txt = ' '.join(f'{LEVEL_NAME[lv]}×{dist[lv]}' for lv in sorted(dist))
+    print(f'  等级分布：{dist_txt or "（无）"}｜自动开图审工单 {n_ticket} 张')
+    if skipped:
+        print('🔴🔴 --skip-review：用户明说跳过审核，以下 L2/L3 题**未开工单、未走等级审**，'
+              '上架不再被闸④拦，风险由用户承担：' + ' '.join(skipped))
 
     print(f'{"干跑" if dry else "回流"}：{len(ok_ids)}/{len(items)} 过闸' +
           ('' if not all_errs else f'，{len(all_errs)} 条拒收：'))
@@ -271,8 +425,9 @@ def cmd_ingest(conn, args, dry=False):
             print('⚠️ --partial：过闸的已入，拒收的如上——别当没看见')
     elif all_errs and not args.partial and not dry:
         print('🔴 全批回滚（默认全或无；要部分入加 --partial）')
-    return (f'pack={args.pack}', f'ok={len(ok_ids)}/{len(items)} rej={len(all_errs)}',
-            0 if not all_errs else 1)
+    detail = (f'ok={len(ok_ids)}/{len(items)} rej={len(all_errs)} '
+              f'等级[{dist_txt}] 工单={n_ticket}' + ('（--skip-review 跳过审核）' if skip_review else ''))
+    return f'pack={args.pack}', detail, 0 if not all_errs else 1
 
 
 def cmd_promote(conn, args):
@@ -284,20 +439,83 @@ def cmd_promote(conn, args):
             "SELECT id FROM question WHERE id LIKE ? AND status='草稿'", (args.match,))]
     if not ids:
         sys.exit('🔴 promote：没有目标（--ids 或 --match）')
-    n = 0
+    n, blocked, skipped = 0, [], 0
     for qid in ids:
         row = conn.execute('SELECT status FROM question WHERE id=?', (qid,)).fetchone()
         if not row:
             print(f'  ✗ {qid} 不存在')
+            skipped += 1
             continue
         if row[0] != '草稿':
             print(f'  · {qid} 状态={row[0]}，跳过')
+            skipped += 1
+            continue
+        # 🔴 闸④（gates.assert_promotable）：还挂待处理审核工单的题不许上架——先审后上
+        try:
+            assert_promotable(conn, qid)
+        except GateError as e:
+            print(f'  ✗ {qid} 被闸④拦下：{e}')
+            blocked.append(qid)
             continue
         conn.execute("UPDATE question SET status='上架', updated_at=? WHERE id=?", (now(), qid))
         n += 1
+        print(f'  √ {qid} 草稿→上架')
     conn.commit()
-    print(f'promote：{n}/{len(ids)} 草稿→上架')
-    return f'{len(ids)}个', f'promoted={n}', 0
+    print(f'promote：{n}/{len(ids)} 草稿→上架'
+          f'｜闸④拦下 {len(blocked)}｜非草稿或不存在 {skipped}')
+    if blocked:
+        print('🔴 被拦的题工单没处理完（tickets 看清单，ticket-done 处理后再 promote）：' + ' '.join(blocked))
+    return (f'{len(ids)}个', f'promoted={n} blocked={len(blocked)} skipped={skipped}',
+            0 if not blocked else 1)
+
+
+# ── 审核工单原语（写动作归工具，页面只读 —— 与 D-14 待办同口径）────────
+def cmd_tickets(conn, args):
+    st = getattr(args, 'status', None) or '待处理'
+    if st == '全部':
+        rows = conn.execute(
+            'SELECT id,kind,ref,status,note,created_at,done_at FROM review_ticket ORDER BY id').fetchall()
+    else:
+        rows = conn.execute(
+            'SELECT id,kind,ref,status,note,created_at,done_at FROM review_ticket '
+            'WHERE status=? ORDER BY id', (st,)).fetchall()
+    print(f'审核工单（status={st}）：{len(rows)} 张')
+    if rows:
+        print(f'{"id":<6}{"kind":<8}{"status":<8}{"ref":<20}{"created_at":<21}note')
+        for tid, kind, ref, status, note, created, done in rows:
+            tail = str(note or '').replace('\n', '　｜　') + (f'（done_at={done}）' if done else '')
+            print(f'{tid:<6}{kind:<8}{status:<8}{str(ref or "-"):<20}{str(created or "-"):<21}{tail}')
+    return f'status={st}', f'rows={len(rows)}', 0
+
+
+def cmd_ticket_done(conn, args):
+    row = conn.execute(
+        'SELECT id,kind,ref,status,note FROM review_ticket WHERE id=?', (args.id,)).fetchone()
+    if not row:
+        print(f'🔴 工单 #{args.id} 不存在')
+        return f'id={args.id}', 'not_found', 1
+    tid, kind, ref, status, note = row
+    # 🔴 已处理/已驳回的工单不许再改（审核结论是留痕，不是草稿；要翻案另开工单）
+    if status != '待处理':
+        print(f'🔴 工单 #{tid} 当前 status={status}，不是「待处理」——已结的工单不许再改'
+              f'（审核结论是留痕；要翻案请另开工单）。')
+        return f'id={tid}', f'refused status={status}', 1
+    new_status = '已驳回' if getattr(args, 'reject', False) else '已处理'
+    new_note = note or ''
+    if getattr(args, 'note', None):
+        new_note = (new_note + '\n' if new_note else '') + f'[{new_status}] {args.note}'
+    conn.execute('UPDATE review_ticket SET status=?, note=?, done_at=? WHERE id=?',
+                 (new_status, new_note, now(), tid))
+    conn.commit()
+    print(f'工单 #{tid}（{kind}·ref={ref}）待处理 → {new_status}，done_at={now()}')
+    left = conn.execute(
+        "SELECT COUNT(*) FROM review_ticket WHERE ref=? AND status='待处理'", (ref,)).fetchone()[0]
+    print(f'  该 ref 剩余待处理工单：{left} 张' + ('（可 promote 了）' if left == 0 else '（还上不了架）'))
+    if new_status == '已驳回' and left == 0:
+        # 🔴 闸④只认「待处理」：驳回=已结，它就不拦了。驳回的题必须显式处置，别让它顺着 promote 溜上架。
+        print(f'  🔴 注意：闸④只拦「待处理」工单，{ref} 现在没有待处理单了 ⇒ promote 不会再被拦。'
+              f'驳回意味着这题要重录/退役，请显式处置（改 status 或重开工单），别让它溜上架。')
+    return f'id={tid}', f'{new_status} ref={ref} left={left}', 0
 
 
 def main():
@@ -309,8 +527,16 @@ def main():
         s.add_argument('pack')
         s.add_argument('--partial', action='store_true', help='过闸的入、拒收的列清单（默认全或无）')
         s.add_argument('--allow-dup', action='store_true', help='match_key 撞库仍放行（变式同题面时显式用）')
+        s.add_argument('--skip-review', action='store_true',
+                       help='🔴 用户明说跳过审核：L2/L3 不开工单（执行阀④口径），报告里大字标明')
     s = sub.add_parser('promote')
     s.add_argument('--ids'); s.add_argument('--match')
+    s = sub.add_parser('tickets')
+    s.add_argument('--status', default='待处理', choices=['待处理', '已处理', '已驳回', '全部'])
+    s = sub.add_parser('ticket-done')
+    s.add_argument('--id', type=int, required=True)
+    s.add_argument('--note', help='审核结论（追加进 note，不覆盖机械判定原文）')
+    s.add_argument('--reject', action='store_true', help='驳回（→已驳回）而非通过（→已处理）')
     args = ap.parse_args()
 
     t0 = time.time()
@@ -320,6 +546,10 @@ def main():
             digest, detail, code = cmd_ingest(conn, args, dry=False)
         elif args.cmd == 'check':
             digest, detail, code = cmd_ingest(conn, args, dry=True)
+        elif args.cmd == 'tickets':
+            digest, detail, code = cmd_tickets(conn, args)
+        elif args.cmd == 'ticket-done':
+            digest, detail, code = cmd_ticket_done(conn, args)
         else:
             digest, detail, code = cmd_promote(conn, args)
         log_skill(conn, args.cmd, digest, '成功' if code == 0 else '失败', detail, t0)

@@ -427,10 +427,16 @@ def open_kb(db_path):
 # 闸④　promote 前置闸（D-21 等级审的出口：先审后上架）
 # ══════════════════════════════════════════════════════════════════════
 def assert_promotable(conn, qid):
-    """草稿→上架前置：还挂着待处理审核工单（等级审 L2/L3 图审等）的题不许上架。"""
-    n = conn.execute(
-        "SELECT COUNT(*) FROM review_ticket WHERE ref=? AND status='待处理'", (qid,)).fetchone()[0]
-    if n:
+    """草稿→上架前置：挂着「待处理」或「已驳回」审核工单的题不许上架。
+
+    🔴 已驳回也拦（2026-08-19 调度中心拍板，堵 P7 语义缺口）：驳回=审没过，
+    重审通过（开新单再结掉）或把题显式退役之前，绝不放行——驳回≠放行。"""
+    rows = conn.execute(
+        "SELECT status, COUNT(*) FROM review_ticket WHERE ref=? AND status IN ('待处理','已驳回') "
+        "GROUP BY status", (qid,)).fetchall()
+    if rows:
+        detail = '、'.join(f'{s}×{c}' for s, c in rows)
         raise GateError(
-            f'promote 闸：{qid} 还有 {n} 张待处理审核工单——等级审没走完不许上架（先审后上，不许静默跳）。')
+            f'promote 闸：{qid} 挂着审核工单（{detail}）——先审后上：待处理的先审，'
+            f'已驳回的重审通过（新单结掉）或显式退役，绝不静默放行。')
     return True

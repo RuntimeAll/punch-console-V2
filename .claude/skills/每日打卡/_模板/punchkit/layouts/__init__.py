@@ -74,6 +74,7 @@ _MODULES = {
     'two_col_spread': '.two_col_spread',      # 两列平摊开：一列一节、8~10 道过程题一页
     'preschool_v1': '.preschool_v1',          # 彩边大字·学前：幼小衔接页型，题目自带作答格
     'preschool_v2': '.preschool_v2',          # 通栏节头·学前B版：与 v1 配对做 A/B 双号
+    'exam_paper': '.exam_paper',              # A4 真卷：卷头+评分表+大题节标题带分值+题号全卷连号
 }
 
 # 尚未迁进本库、但已有可用实现的骨架（登记在册，避免重复造轮子）

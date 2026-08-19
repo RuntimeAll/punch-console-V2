@@ -443,6 +443,10 @@ class PerPaperLayout(object):
         p = self.per[idx]
         c = dict(ctx)
         c['sections'] = p['sections']
+        # 🔴 逐卷把整个 layout_json 递给骨架（2026-08-20 为 `exam_paper` 加）：
+        #    试卷骨架要的「满分/考试时长/副标题/姓名行/评分表/装订线」都是**每张卷自己的**，
+        #    而 ctx 是整册一套。骨架不认这个键的（打卡册那几套）原样不受影响。
+        c['paper_layout'] = p.get('layout') or {}
         # 骨架的中文天序表只有「一…十」十个字，第 11 天起会 IndexError；
         # 反正标题整条要被换掉，这里给它一个安全下标即可。
         cn = getattr(self.base, 'CN', '')
@@ -506,6 +510,11 @@ def load_pack(path):
     return pack
 
 
+# 🔴 LAYOUT 注册点：题号由骨架自己打全卷连号的版式，不吃渲染器 ①~⑩ 圈码的 10 题上限
+#    （`exam_paper` 的 `_renumber` 把节内号整个换掉——真卷选择题常有 11~12 题）
+_SELF_NUMBERED_LAYOUTS = {'exam_paper'}
+
+
 def build_days(papers):
     """→ (days, per_paper, layout_key, body_pt, watermark)"""
     days, per = [], []
@@ -542,14 +551,15 @@ def build_days(papers):
             grp = sorted(bucket[s['name']], key=lambda x: (x.get('ord') is None, x.get('ord')))
             if not grp:
                 print('  ⚠️ [%s] 节「%s」一道题都没有，将渲成空节' % (pw, s['name']))
-            if len(grp) > 10:
+            if len(grp) > 10 and (lay.get('layout') or layouts.DEFAULT) \
+                    not in _SELF_NUMBERED_LAYOUTS:
                 raise PackError('[%s] 节「%s」有 %d 题 —— 渲染器答案卷圈码只有 ①~⑩，拒渲'
                                 % (pw, s['name'], len(grp)))
             day.append([adapt_item(it, s['slot'],
                                    '%s.%s#%s' % (pw, s['name'], it.get('ord')))
                         for it in grp])
         days.append(day)
-        per.append({'sections': secs,
+        per.append({'sections': secs, 'layout': lay,
                     'title': md_to_delim(paper.get('title') or '第%s天' % (pi + 1), pw)})
     if len(keys) > 1:
         raise PackError('一册里出现多个骨架 %s —— 一册一骨架，拒渲' % sorted(keys))

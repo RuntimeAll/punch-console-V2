@@ -98,8 +98,12 @@ def page_count(pdf_path):
 
 
 # ═══════════════ ⑤ 目检图 ═══════════════
-def to_png(pdf_path, out_dir, prefix, dpi=118, limit=3):
-    """PDF 逐页转 PNG。🔴 出卷后必须 Read 亲自看过——数据对不等于渲染对。"""
+def to_png(pdf_path, out_dir, prefix, dpi=118, limit=None):
+    """PDF 逐页转 PNG。🔴 出卷后必须 Read 亲自看过——数据对不等于渲染对。
+
+    🔴 limit 缺省=全页（2026-08-20 改）：原写死 3 页是打卡册（1~2 页）时代的口径，
+       真卷 4~5 页被截——8 卷目检因此误报 5 卷"缺题"，PDF 本体明明是全的。
+       目检图不全比没有目检图更坏：它让人以为看全了。"""
     try:
         import fitz
     except ImportError:
@@ -107,7 +111,7 @@ def to_png(pdf_path, out_dir, prefix, dpi=118, limit=3):
     doc = fitz.open(pdf_path)
     out = []
     for i, pg in enumerate(doc):
-        if i >= limit:
+        if limit is not None and i >= limit:
             break
         p = os.path.join(out_dir, '_chk_%s_p%d.png' % (prefix, i + 1))
         pg.get_pixmap(dpi=dpi).save(p)

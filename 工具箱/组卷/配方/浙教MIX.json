@@ -1,0 +1,59 @@
+{
+ "_契约": "paper-recipe/v1",
+ "_来源": "2026-08-20 窗G 浙教出卷战役 scratchpad 主线-浙教出卷方案.json 的 RECIPES['MIX'] + 主线-浙教出件.py 的 META['MIX']；口径=卷8 结构 + 温和难度 + 两单元对半轮转。PRD-008 段① 转正拆出。",
+ "id": "浙教MIX",
+ "key": "MIX",
+ "title": "有理数 全章综合测试",
+ "units": ["一", "二"],
+ "full_score": 120,
+ "duration_min": 100,
+
+ "artifact": {
+  "name_prefix": "浙教出卷·MIX",
+  "kind": "专项卷",
+  "source_line": "浙教出卷"
+ },
+
+ "pool": {
+  "unit_kp_prefix": {"一": "100001", "二": "100002"},
+  "status": ["草稿", "上架"],
+  "tier_order": ["一级", "二级"],
+  "tier_exclude": ["三级"],
+  "_注": "tier_order 即优先级（一级·浙教优先、二级·人教互通补）；tier_exclude 的题绝不取（版本使用级三档口径=窗F）。"
+ },
+
+ "exclude_qids": [],
+ "_exclude注": "常驻排除清单（qid 数组）：泄答案闸拦下、或人工判定不再入卷的题写这里——换题走「加进清单+重跑 draft_paper」，不再手改库里的 paper_item（窗G 手工换题的教训）。🔴 排除会连锁改变其后所有槽的取题，方案整体重出。命令行 --exclude/--exclude-file 与本字段取并集。",
+ "kp_cap": [2, 4],
+ "_kp_cap注": "同主考点每卷最多 2 题；该档取不到时放宽到 4（v4 原口径）。",
+
+ "降档阶梯": {"压轴": "中档", "中档": "巩固", "巩固": "送分", "送分": "巩固"},
+ "_阶梯注": "格干涸就近替补；每格最多试 3 档（原档+两级）。送分→巩固 是升档顶位（v4 原逻辑：送分池干时用巩固顶），一样按替补留痕。",
+
+ "layout": {
+  "layout": "exam_paper",
+  "body_pt": 11.2,
+  "watermark": null,
+  "subtitle": "第1~2章 有理数与有理数的运算",
+  "name_row": false,
+  "score_table": true,
+  "seal_line": true,
+  "head_note": ""
+ },
+ "_head_note注": "2026-08-20 用户令：卷头「浙教版配方｜题源」标注行全部去掉，此处保持空串。",
+
+ "sections": [
+  {"name": "一、选择题", "slot": "选择", "render_slot": "choice",
+   "score": 3, "mix": [["送分", 2], ["巩固", 3], ["中档", 4], ["压轴", 1]],
+   "score_note": "每小题 3 分，共 30 分",
+   "grid": "block", "gap": 0, "gap_each": 0, "ans_cols": 1, "show_item_score": false},
+  {"name": "二、填空题", "slot": "填空", "render_slot": "fill",
+   "score": 4, "mix": [["送分", 1], ["巩固", 2], ["中档", 2], ["压轴", 1]],
+   "score_note": "每小题 4 分，共 24 分",
+   "grid": "block", "gap": 0, "gap_each": 2, "ans_cols": 1, "show_item_score": false},
+  {"name": "三、解答题", "slot": "解答", "render_slot": "fill",
+   "score": [6, 8, 8, 10, 10, 12, 12], "mix": [["巩固", 2], ["中档", 3], ["压轴", 2]],
+   "score_note": "共 66 分",
+   "grid": "block", "gap": 0, "gap_each": 40, "ans_cols": 1, "show_item_score": true}
+ ]
+}

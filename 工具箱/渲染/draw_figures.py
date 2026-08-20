@@ -576,6 +576,79 @@ SPECS = [
          labels=[(26.5, '-1', 'below'), (54, 'b', 'below'), (73, '0', 'below'),
                  (119, '1', 'below'), (140.5, 'a', 'below'), (165, '2', 'below')],
          gap_below=10),
+
+    # ================================================================
+    # 收尾战役·图预制（2026-08-20）：卷7 / 卷8 尚未入库，无 qid、无旧裁图，
+    # 故 qid / old_hash 记 None；几何量照原扫描页实测（页尺寸卷7 1080×162x、卷8 1280×1811）。
+    # ================================================================
+
+    # ---- 卷7（第1章 有理数 综合检测卷）----
+    dict(key='j7_t6', qid=None, vol='卷7', qno=6, slot=None, old_hash=None,
+         width='40%', kind='数轴：A/B/C 三实心点，A—B 相距 2 格、B—C 相距 4 格（A 与 C 相距 6 格），字母标在点下方',
+         name='j7_t6', type='numline',
+         view=(430, 888, 700, 916), pad=12, font=20,
+         axis=dict(x0=430, y=894, x1=700), tick_up=4,
+         ticks=[481, 554, 591, 628],
+         dots=[443.5, 517.5, 664.5], dot_r=3,
+         labels=[(443.5, 'A', 'below'), (517.5, 'B', 'below'), (664.5, 'C', 'below')],
+         gap_below=8),
+
+    dict(key='j7_t11', qid=None, vol='卷7', qno=11, slot=None, old_hash=None,
+         width='40%', kind='数轴 + 椭圆墨迹遮盖，两端实心点外侧标 −109.2 / 10.5',
+         name='j7_t11', type='numline',
+         view=(405, 202, 677, 237), pad=12, font=21,
+         axis=dict(x0=421, y=218, x1=677),
+         inks=[dict(cx=542, rx=78, ry=14)],
+         dots=[464, 620], dot_r=2.8,
+         labels=[(434.5, '-109.2', 'below'), (636.5, '10.5', 'below')],
+         gap_below=4),
+
+    dict(key='j7_t16', qid=None, vol='卷7', qno=16, slot=None, old_hash=None,
+         width='40%', kind='数轴 −3~3：实心点 A 在 −3、B 在 0、C 在 2，字母标在点上方',
+         name='j7_t16', type='numline',
+         view=(745, 1000, 1032, 1044), pad=12, font=21,
+         axis=dict(x0=745, y=1025, x1=1032), tick_up=5,
+         ticks=[811, 850, 930, 1009],
+         dots=[771, 890, 969.5], dot_r=2.8,
+         labels=[(771 + i * 39.67, s, 'below') for i, s in
+                 enumerate(['-3', '-2', '-1', '0', '1', '2', '3'])]
+                + [(771, 'A', 'above'), (890, 'B', 'above'), (969.5, 'C', 'above')],
+         gap_below=4, gap_above=9),
+
+    dict(key='j7_t17', qid=None, vol='卷7', qno=17, slot=None, old_hash=None,
+         width='48%', kind='空白数轴 −5~5：11 刻度全标数字、无描点（供学生描点作答）',
+         name='j7_t17', type='numline',
+         view=(589, 242, 1040, 269), pad=13, font=22,
+         axis=dict(x0=589, y=249, x1=1040), tick_up=5,
+         ticks=evenly(620, 39.6, 11),
+         labels=[(620 + i * 39.6, s, 'below') for i, s in
+                 enumerate(['-5', '-4', '-3', '-2', '-1', '0', '1', '2', '3', '4', '5'])],
+         gap_below=4),
+
+    dict(key='j7_t18', qid=None, vol='卷7', qno=18, slot=None, old_hash=None,
+         width='40%', kind='数轴 + 两块墨迹：左块 −6.3 至 −2 与 −1 之间，右块 0 与 1 之间至 4.1；−1、0、5、6 露在墨迹外',
+         name='j7_t18', type='numline',
+         view=(738, 454, 1040, 487), pad=13, font=19,
+         axis=dict(x0=755, y=467, x1=1040),
+         inks=[dict(cx=813.3, rx=46.7, ry=11), dict(cx=942.6, rx=38.1, ry=11)],
+         ticks=[875.7, 896.3, 999.2, 1019.8], tick_up=7,
+         dots=[766.6, 980.7], dot_r=2.8,
+         labels=[(758, '-6.3', 'below'), (875.7, '-1', 'below'), (896.3, '0', 'below'),
+                 (974, '4.1', 'below'), (999.2, '5', 'below'), (1019.8, '6', 'below')],
+         gap_below=4),
+
+    # ---- 卷8（第2章 有理数的运算单元测试卷 B卷提升篇）----
+    dict(key='j8_t6', qid=None, vol='卷8', qno=6, slot=None, old_hash=None,
+         width='40%', kind='数轴 −1/0/1 三刻度：实心点 A 在 −1 与 0 之间偏靠 0（标 a）、实心点 B 在 1 右侧（标 b）',
+         name='j8_t6', type='numline',
+         view=(145, 158, 430, 206), pad=13, font=24,
+         axis=dict(x0=145, y=184, x1=430), tick_up=7,
+         ticks=[225, 287, 349],
+         dots=[266, 373], dot_r=5,
+         labels=[(225, '-1', 'below'), (287, '0', 'below'), (349, '1', 'below'),
+                 (266, 'a', 'below'), (373, 'b', 'below'),
+                 (266, 'A', 'above'), (373, 'B', 'above')],
+         gap_below=5, gap_above=8),
 ]
 
 

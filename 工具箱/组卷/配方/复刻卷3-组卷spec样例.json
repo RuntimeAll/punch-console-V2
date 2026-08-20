@@ -1,0 +1,29 @@
+{
+ "_契约": "paper-spec/v1（paper_tool.py assemble 直接吃的 spec）",
+ "_来源": "2026-08-20 试卷复刻战役 scratchpad fk2_卷3_spec.json 原样平移（PRD-008 段① 归档）。卷3=保真定版款，窗D 段1 已把复刻卷1/2/4/5 的 layout 统一到本款。",
+ "_用法": "① 当版式样板读（exam_paper 全旋钮实例）；② 换 qids 即可复刻/平行出卷：python 工具箱/组卷/paper_tool.py --db 知识库/kb.db assemble --spec <本文件副本>。qids 是战役当时的真库 id，直接重跑会命中同名 artifact 幂等重排。",
+
+ "artifact": {"name": "七上试卷复刻·卷3·全量", "kind": "专项卷", "source_line": "试卷复刻"},
+ "papers": [{
+  "kind": "专项卷", "title": "七年级数学上册单元测试卷", "ord": 1,
+  "layout": {
+   "layout": "exam_paper", "body_pt": 11.2, "watermark": null,
+   "subtitle": "第1章 有理数", "full_score": 120, "duration_min": 120,
+   "name_row": false, "score_table": true, "seal_line": true,
+   "sections": [
+    {"name": "一、选择题", "slot": "choice", "grid": "block", "cols": 1, "gap": 0, "gap_each": 0, "ans_cols": 1,
+     "score_note": "每小题 3 分，共 33 分，以下每小题都给出了四个答案，其中只有一个是正确的",
+     "item_scores": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3], "show_item_score": false},
+    {"name": "二、填空题", "slot": "fill", "grid": "block", "cols": 1, "gap": 0, "gap_each": 0, "ans_cols": 1,
+     "score_note": "每小题 3 分，共 12 分", "item_scores": [3, 3, 3, 3], "show_item_score": false},
+    {"name": "三、解答题", "slot": "fill", "grid": "block", "cols": 1, "gap": 0, "gap_each": 40, "ans_cols": 1,
+     "score_note": "共 75 分", "item_scores": [6, 6, 7, 7, 8, 8, 10, 11, 12], "show_item_score": true}
+   ]
+  },
+  "sections": [
+   {"name": "一、选择题", "qids": ["q202608200612eceb", "q20260820f2b0bd06", "q20260820b2b3ae52", "q202608200c0087ff", "q20260820f45dd76b", "q20260820752cc2fa", "q20260820ee7728b4", "q20260820ee495a17", "q20260820ef3b019a", "q2026082032e5ddac", "q20260820ae65f360"]},
+   {"name": "二、填空题", "qids": ["q2026082008f7c83d", "q202608202716c56c", "q202608200a81c158", "q202608207f97010d"]},
+   {"name": "三、解答题", "qids": ["q20260820d13fc200", "q202608204936d44b", "q202608207bf9cc44", "q20260820da22b3ca", "q20260820eb0d83a7", "q202608201109eb9a", "q202608200ba982f4", "q20260820cc0dfe34", "q2026082028bc8041"]}
+  ]
+ }]
+}

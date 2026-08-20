@@ -1,0 +1,64 @@
+{
+ "_契约": "paper-knobs/v1",
+ "_来源": "2026-08-20 试卷复刻战役 scratchpad 主线-版式旋钮.json 原样平移（PRD-008 段① 归档）。卷3 不在本表——卷3 是「保真定版款」，整卷 spec 见同目录 复刻卷3-组卷spec样例.json；窗D 段1 已把卷1/2/4/5 的 paper.layout_json 统一改成卷3 款，本表=**复刻期原卷版式实测记录**（改回一比一复刻时的依据），不是当前库内现状。",
+ "_用法": "本表是 layout 旋钮档案，不被 draft_paper.py 读取；要按某卷版式出件，把对应块并进 paper_run 的 spec.papers[].layout（键名与 exam_paper 渲染器一致：name_row/name_fields/score_table/seal_line/seal_fields/head_note/sections[].slot|show_item_score|item_scores|gap_each_mm）。",
+
+ "卷1": {
+  "title": "第一章 有理数单元测试（A卷·夯实基础）", "subtitle": "",
+  "full_score": 100, "duration_min": 60,
+  "name_row": true, "name_fields": ["班级", "姓名", "学号", "分数"],
+  "score_table": false, "seal_line": false, "head_note": "",
+  "sections": [
+   {"name": "一、单选题(共30分)", "slot": "choice", "show_item_score": true,
+    "item_scores": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3], "gap_each_mm": 2},
+   {"name": "二、填空题(共24分)", "slot": "fill", "show_item_score": true,
+    "item_scores": [4, 4, 4, 4, 4, 4], "gap_each_mm": 2},
+   {"name": "三、解答题(共46分)", "slot": "fill", "show_item_score": true,
+    "item_scores": [6, 6, 6, 6, 6, 8, 8], "gap_each_mm": 50}]
+ },
+ "卷2": {
+  "title": "七年级上册数学第一章《有理数》单元测试卷", "subtitle": "",
+  "full_score": 100, "duration_min": 80,
+  "name_row": false, "score_table": false, "seal_line": false, "head_note": "",
+  "sections": [
+   {"name": "一．选择题（共10小题，满分30分，每小题3分）", "slot": "choice",
+    "show_item_score": false, "item_scores": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3], "gap_each_mm": 0},
+   {"name": "二．填空题（共8小题，满分24分，每小题3分）", "slot": "fill",
+    "show_item_score": false, "item_scores": [3, 3, 3, 3, 3, 3, 3, 3], "gap_each_mm": 2},
+   {"name": "三．解答题（共6小题，满分46分）", "slot": "fill",
+    "show_item_score": true, "item_scores": [8, 6, 8, 8, 8, 8], "gap_each_mm": 30}]
+ },
+ "卷4": {
+  "title": "七上册数学第二章有理数的运算单元试题", "subtitle": "",
+  "full_score": 120, "duration_min": 0,
+  "name_row": false, "score_table": true, "seal_line": true,
+  "seal_fields": ["学号", "姓名", "班级", "学校"], "head_note": "",
+  "sections": [
+   {"name": "一、选择题(共10小题，满分30分，每小题3分)", "slot": "choice",
+    "show_item_score": false, "item_scores": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3], "gap_each_mm": 2},
+   {"name": "二、填空题(共6小题，满分18分，每小题3分)", "slot": "fill",
+    "show_item_score": false, "item_scores": [3, 3, 3, 3, 3, 3], "gap_each_mm": 3},
+   {"name": "三、解答题(共8小题，满分72分)", "slot": "fill",
+    "show_item_score": true, "item_scores": [6, 6, 8, 8, 10, 10, 12, 12], "gap_each_mm": 65}]
+ },
+ "卷5": {
+  "title": "有理数及其运算 单元测试卷二", "subtitle": "",
+  "full_score": 0, "duration_min": 0,
+  "name_row": false, "score_table": false, "seal_line": false, "head_note": "",
+  "sections": [
+   {"name": "一、选择题（本大题共10个小题，每小题3分，共30分）", "slot": "choice",
+    "show_item_score": false, "gap_each_mm": 0},
+   {"name": "二、填空题（每题3分，共15分）", "slot": "fill",
+    "show_item_score": false, "gap_each_mm": 2},
+   {"name": "三、解答题（共8题，共75分）", "slot": "fill",
+    "show_item_score": false, "gap_each_mm": 3}]
+ },
+
+ "_裁量备注": [
+  "卷5：卷面未印满分与时长（120为推得值）→ 不印满分行不跑守恒；解答题分只印了16/17/18三题（8/16/7），item_scores必须全给或不给→整节不逐题印分，记不可为清单",
+  "卷1：原卷分值印法「(本题 X 分)」，模版印法「N.(X 分)」——格式微差记不可为清单",
+  "卷2：选择/填空每题3分取自节名（卷面不逐题印）→item_scores照给跑守恒、show_item_score=false不上卷面",
+  "卷4：卷面没印时长→不印；姓名字段竖排在密封线外缘（seal_fields），卷头无姓名行",
+  "水印（小红书号/保密文件）均为来源平台印记非卷面成分，复刻一律不带"
+ ]
+}

@@ -44,6 +44,20 @@
   python ingest_flow.py check 题目包.json                  # 只过闸不入库（干跑，含等级预判）
   python ingest_flow.py tickets [--status 待处理|已处理|已驳回|全部]     # 列审核工单
   python ingest_flow.py ticket-done --id 7 [--note 结论] [--reject]     # 待处理→已处理/已驳回
+  python ingest_flow.py asset-add --file 裁图.png [--kind figure] [--meta '{…}']   # 图落位+登记
+  python ingest_flow.py asset-add --rel-path 知识库/资产/ab/ab….png                # 已在位的只登记
+
+🔴 asset 域正式写入门 = `asset-add`（PRD-008 §一②-1，2026-08-20 建；此前只有窗内显式 SQL）：
+  · 两态：`--file <源图>`（复算 sha256 → 拷进 `<资产根>/<hash前2>/<hash><后缀>` → 插行）；
+    `--rel-path <已在位路径>`（复算文件 sha256，与文件名核符 → 插行，不搬文件）；
+  · rel_path **一律相对 v2 根、正斜杠**（绝对路径/跳出根一律拒——老货架 717 行绝对路径全断）；
+  · sha256 **对文件本体复算，不信文件名**（文件名只是核符对象，不是依据）；
+  · 幂等：同 hash 已有行 = 跳过并回既有 id（明说「已存在」），绝不重复插、绝不静默覆盖。
+
+🔴 figure 悬空指针闸（X7，PRD-008 §一②-2）：ingest/check/patch-answer/patch-check 四条通路
+  对每题块流里**每个 figure 块**校验 `asset` → ①asset 表有行 ②`<根>/rel_path` 文件真在盘。
+  任一条不成立 = 拒收该题（默认全或无 ⇒ 整包回滚），报错点名题号与 hash。
+  沙盘副本资产树用 `--root <副本根>` 换 rel_path 的解析根（与 渲染链 --asset-root 同义）。
 
 题目包格式（一册/一批一文件）：
 {
@@ -67,6 +81,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import sys
 import time
 import unicodedata
@@ -82,6 +97,8 @@ from gates import (execution_valve, assert_leaf_kp, assert_promotable,  # noqa: 
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / '知识库' / 'kb.db'
+DEFAULT_ASSET_ROOT = ROOT / '知识库' / '资产'
+ASSET_KINDS = ('figure', 'photo', 'sample')       # = schema_kb.sql asset.kind 的 CHECK 值域
 
 
 def now():
@@ -215,6 +232,226 @@ def open_review_ticket(conn, qid, grade):
 
 
 # ══════════════════════════════════════════════════════════════════════
+# asset 域（PRD-008 §一②-1）：正式写入门 + figure 悬空指针闸（X7）
+# ══════════════════════════════════════════════════════════════════════
+# 魔数→后缀（🔴 不信文件名：落位后缀由**文件本体**定，改名改不掉魔数）
+MAGICS = (
+    (b'\x89PNG\r\n\x1a\n', '.png'),
+    (b'\xff\xd8\xff', '.jpg'),
+    (b'GIF87a', '.gif'), (b'GIF89a', '.gif'),
+    (b'BM', '.bmp'),
+    (b'%PDF-', '.pdf'),
+)
+
+
+def sniff_ext(data):
+    """按魔数认后缀；认不出回 None（调用侧拒收，不猜）。"""
+    for magic, ext in MAGICS:
+        if data.startswith(magic):
+            return ext
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return '.webp'
+    head = data[:400].lstrip()
+    if head.startswith(b'<svg') or (head.startswith(b'<?xml') and b'<svg' in data[:1000]):
+        return '.svg'
+    return None
+
+
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def under_root(p, root):
+    """路径 → 相对 v2 根的正斜杠相对路径；绝对/跳出根一律 None（调用侧拒收）。"""
+    try:
+        rel = Path(p).resolve().relative_to(Path(root).resolve())
+    except (ValueError, OSError):
+        return None
+    return rel.as_posix()
+
+
+def rel_path_problem(rel, root):
+    """rel_path 合规体检：合规回 None，违规回原话（与渲染链 AssetResolver 同口径）。"""
+    s = str(rel or '').replace('\\', '/').strip()
+    if not s:
+        return 'rel_path 是空串'
+    if s.startswith('/') or s.startswith('file:') or re.match(r'^[A-Za-z]:', s):
+        return (f'rel_path={rel!r} 是绝对路径——🔴 文件指针一律相对 v2 根'
+                f'（老货架 717 行绝对路径全断的血案）')
+    base = Path(root).resolve()
+    try:
+        (base / s).resolve().relative_to(base)
+    except ValueError:
+        return f'rel_path={rel!r} 跳出了根 {base}'
+    return None
+
+
+def _iter_figures(doc, tag):
+    """块流里的全部 figure 块（option 内、table 格内的一并数）→ [(块路径, cell)]。"""
+    out = []
+
+    def walk(cells, path):
+        for i, c in enumerate(cells):
+            if not isinstance(c, dict):
+                continue
+            t, p = c.get('type'), f'{path}[{i}]'
+            if t == 'figure':
+                out.append((p, c))
+            elif t == 'option':
+                walk(c.get('blocks') or [], p + '.blocks')
+            elif t == 'table':
+                for ri, trow in enumerate(c.get('rows') or []):
+                    if isinstance(trow, list):
+                        for ci, tcell in enumerate(trow):
+                            if isinstance(tcell, list):
+                                walk(tcell, f'{p}.rows[{ri}][{ci}]')
+
+    if isinstance(doc, dict):
+        for ri, row in enumerate(doc.get('rows') or []):
+            walk(((row or {}).get('cells') or []), f'{tag}.rows[{ri}].cells')
+    return out
+
+
+def figure_ref_errors(conn, docs, root, where):
+    """🔴 X7 figure 悬空指针闸：每个 figure.asset 必须①asset 表有行 ②文件真在盘上。
+
+    docs —— [(块流标签, 块流 dict), …]（题面/答案/解析都吃）；where —— 报错前缀（点名题号）。
+    返回错误清单（空 = 全解析）。缺 asset 字段本身归块流校验器管，此闸只管「指针指空」。
+    """
+    errs = []
+    for label, doc in docs:
+        for path, cell in _iter_figures(doc, label):
+            h = cell.get('asset')
+            if not isinstance(h, str) or not h.strip():
+                continue                      # 缺 asset = 块流校验器的活，不在这儿重复报
+            h = h.strip()
+            row = conn.execute('SELECT rel_path FROM asset WHERE hash=?', (h,)).fetchone()
+            if not row or not row[0]:
+                errs.append(f'{where} {path} figure 悬空：asset={h} 在 asset 表查无此行'
+                            f'——先 asset-add 落位登记再入库（悬空指针=印出来缺图）')
+                continue
+            bad = rel_path_problem(row[0], root)
+            if bad:
+                errs.append(f'{where} {path} figure asset={h} 登记违纪：{bad}')
+                continue
+            full = Path(root) / str(row[0]).replace('\\', '/')
+            if not full.exists():
+                errs.append(f'{where} {path} figure 悬空：asset={h} 有登记行但文件不在盘上'
+                            f'（rel_path={row[0]}，根={Path(root).resolve()}）')
+    return errs
+
+
+def cmd_asset_add(conn, args):
+    """asset 域唯一正式写入门：落位（可选）+ 登记，hash 对文件本体复算。"""
+    root = Path(getattr(args, 'root', None) or ROOT)
+    # 🔴 入参违例走 return 不走 sys.exit：sys.exit 会跳过 main 的 log_skill，
+    #    「每次执行落 skill_log」就成了注释谎言（拒收也是执行，也要留痕）。
+    if not (bool(args.file) ^ bool(args.rel_path)):
+        print('🔴 asset-add 拒收：--file 与 --rel-path 二选一（给了两个或一个都没给）')
+        return 'asset-add', 'reject:mode', 1
+    kind = args.kind or 'figure'
+    if kind not in ASSET_KINDS:
+        print(f'🔴 asset-add 拒收：--kind={kind!r} 不在 {ASSET_KINDS}（schema 的 CHECK 值域）')
+        return f'kind={kind}', 'reject:kind', 1
+    meta = {}
+    if args.meta:
+        try:
+            meta = json.loads(args.meta)
+        except Exception as e:                                   # noqa: BLE001
+            print(f'🔴 asset-add 拒收：--meta 不是合法 JSON（{e}）')
+            return 'asset-add', 'reject:meta', 1
+        if not isinstance(meta, dict):
+            print('🔴 asset-add 拒收：--meta 必须是 JSON 对象')
+            return 'asset-add', 'reject:meta', 1
+
+    # ── ①算 hash + 定落位 ──────────────────────────────────────────────
+    if args.rel_path:
+        # 已在位态：只登记不搬文件；rel_path 先过合规闸，再复算 sha256 与文件名核符
+        rel = str(args.rel_path).replace('\\', '/').strip()
+        bad = rel_path_problem(rel, root)
+        if bad:
+            print(f'🔴 asset-add 拒收：{bad}——rel_path 一律相对 v2 根、正斜杠')
+            return f'rel={rel}', 'reject:rel_path', 1
+        src = root / rel
+        if not src.exists():
+            print(f'🔴 asset-add 拒收：文件不在盘上 {src}（rel_path={rel}，根={root.resolve()}）'
+                  f'——登记的是指针，指针必须有实体')
+            return f'rel={rel}', 'reject:missing', 1
+        h = sha256_of(src)
+        stem = src.stem
+        if stem != h:
+            print(f'🔴 asset-add 拒收：hash 不符——文件本体 sha256={h}，文件名却是 {stem!r}'
+                  f'（{rel}）。🔴 hash 对文件本体复算，不信文件名；改名/换内容都会被这道闸拦下。')
+            return f'rel={rel}', 'reject:hash', 1
+        data_len = src.stat().st_size
+        placed = None
+    else:
+        src = Path(args.file)
+        if not src.is_absolute():
+            src = Path.cwd() / src
+        if not src.exists() or not src.is_file():
+            print(f'🔴 asset-add 拒收：源文件不存在 {args.file}')
+            return f'file={args.file}', 'reject:missing', 1
+        data = src.read_bytes()
+        h = hashlib.sha256(data).hexdigest()
+        data_len = len(data)
+        ext = sniff_ext(data)
+        if not ext:
+            print(f'🔴 asset-add 拒收：{src} 魔数认不出图片/PDF 类型（前 8 字节 {data[:8]!r}）'
+                  f'——认不出就不猜，先确认这是不是要入库的资产')
+            return f'file={args.file}', 'reject:magic', 1
+        aroot = Path(args.asset_root) if args.asset_root else DEFAULT_ASSET_ROOT
+        if not aroot.is_absolute():
+            aroot = root / aroot
+        arel = under_root(aroot, root)
+        if arel is None:
+            print(f'🔴 asset-add 拒收：--asset-root={aroot} 不在 v2 根 {root.resolve()} 里'
+                  f'——rel_path 必须相对 v2 根，根外的资产树登记出来就是死指针')
+            return f'file={args.file}', 'reject:asset-root', 1
+        rel = f'{arel}/{h[:2]}/{h}{ext}'
+        placed = root / rel
+
+    # ── ②幂等：同 hash 已有行 = 跳过，回既有 id ────────────────────────
+    old = conn.execute('SELECT rel_path, kind, created_at FROM asset WHERE hash=?', (h,)).fetchone()
+    if old:
+        print(f'· 已存在：asset={h}（kind={old[1]}，登记于 {old[2]}）')
+        print(f'  登记落位：{old[0]}')
+        if placed is not None and old[0] != rel:
+            print(f'  ⚠ 本次目标落位 {rel} 与登记不同——**以登记为准**：不改行、不搬文件'
+                  f'（内容 hash 相同=同一份资产，改落位就是造死指针）')
+        elif placed is not None and not placed.exists():
+            placed.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, placed)
+            print(f'  ⚠ 登记在、文件不在盘 → 已按登记补落位：{rel}')
+        print(f'id={h}')
+        return f'hash={h[:12]}', f'exists rel={old[0]}', 0
+
+    # ── ③落位（--file 态）+ 插行 ──────────────────────────────────────
+    if placed is not None:
+        placed.parent.mkdir(parents=True, exist_ok=True)
+        if placed.exists():
+            # 内容寻址：同名文件必须同内容，否则是撞车（本不该发生），拒收不覆盖
+            if sha256_of(placed) != h:
+                print(f'🔴 asset-add 拒收：目标落位已有文件且内容不同 {rel}——绝不静默覆盖')
+                return f'hash={h[:12]}', 'reject:collide', 1
+        else:
+            shutil.copy2(src, placed)
+        meta.setdefault('来源文件', under_root(src, root) or src.name)
+    meta.setdefault('bytes', data_len)
+    conn.execute('INSERT INTO asset(hash,kind,rel_path,meta_json,created_at) VALUES (?,?,?,?,?)',
+                 (h, kind, rel, json.dumps(meta, ensure_ascii=False), now()))
+    conn.commit()
+    print(f'√ asset 登记：kind={kind} bytes={data_len}')
+    print(f'  rel_path={rel}' + ('（已拷入）' if placed is not None else '（原地登记，未搬文件）'))
+    print(f'id={h}')
+    return f'hash={h[:12]}', f'new kind={kind} rel={rel}', 0
+
+
+# ══════════════════════════════════════════════════════════════════════
 # 入库收尾：增量向量（D-20 第③层跟着入库走，不用人记着补）
 # ══════════════════════════════════════════════════════════════════════
 VEC_HINT = ('  补：python 工具箱\\检索\\embed_tool.py build --db <本次的库>'
@@ -332,11 +569,12 @@ def ensure_tag(conn, domain, name):
     return tid
 
 
-def ingest_one(conn, item, idx, allow_dup, skip_review=False):
+def ingest_one(conn, item, idx, allow_dup, skip_review=False, root=None):
     """单题回流。返回 (qid, 错误清单|None, 等级 dict|None)。
 
     等级审在闸前先算（拒收的题也报等级，便于人看这批到底难在哪），
     工单只在真入库之后开（不给不存在的 qid 挂工单）。
+    root —— figure 悬空闸解析 rel_path 的根（缺省 v2 根；沙盘副本资产树才传）。
     """
     errs = []
     blocks = item.get('blocks')
@@ -396,6 +634,14 @@ def ingest_one(conn, item, idx, allow_dup, skip_review=False):
     if not ok:
         errs += [f"items[{idx}] 执行阀{r['no']}·{r['name']}: {r['detail']}" for r in results if not r['ok']]
 
+    # 🔴 X7 figure 悬空指针闸：题面/答案/解析里每个 figure 都要能落到盘上的真文件
+    where = f'items[{idx}]' + (f'（{item["source_raw"]}）' if item.get('source_raw') else '')
+    errs += figure_ref_errors(
+        conn,
+        [('blocks', blocks), ('answer_blocks', item.get('answer_blocks')),
+         ('analysis_blocks', item.get('analysis_blocks'))],
+        root or ROOT, where)
+
     # 相似前查（match_key 撞库）
     mk = item.get('match_key') or match_key_of(blocks)
     if mk:
@@ -444,10 +690,11 @@ def cmd_ingest(conn, args, dry=False):
     if not items:
         sys.exit('🔴 题目包 items 为空')
     skip_review = bool(getattr(args, 'skip_review', False))
+    root = getattr(args, 'root', None) or ROOT
     ok_ids, all_errs, graded = [], [], []
     conn.execute('BEGIN')
     for i, item in enumerate(items):
-        qid, errs, grade = ingest_one(conn, item, i, args.allow_dup, skip_review)
+        qid, errs, grade = ingest_one(conn, item, i, args.allow_dup, skip_review, root)
         graded.append((i, qid, grade, bool(errs)))
         if errs:
             all_errs += errs
@@ -608,7 +855,8 @@ def cmd_patch_answer(conn, args, dry=False):
     INSERT 通路没有回写通路——答案补齐批（先无答案态入库、事后集中解题）需要这条。
 
     口径：🔴 只补空不覆盖——已有答案的题必须 --force 显式放行（同 ingest 对已存在 id 的口径）；
-    闸=validate_blocks(is_stem=False)+第二载体拒收（与执行阀闸③同一份 SECOND_CARRIERS）；
+    闸=validate_blocks(is_stem=False)+第二载体拒收（与执行阀闸③同一份 SECOND_CARRIERS）
+       +🔴 X7 figure 悬空指针闸（答案/解析块也可带图，同一道闸，同一句报错）；
     缺省全或无，--partial 放行过闸子集；confidence<90 的题如实列出待人审，绝不静默。
 
     答案包格式：{"items":[{"id":"q…","answer_blocks":{v2块流},"analysis_blocks":{可选},
@@ -619,6 +867,7 @@ def cmd_patch_answer(conn, args, dry=False):
     if not items:
         sys.exit('🔴 答案包 items 为空')
     ok_n, errs, low_conf = 0, [], []
+    root = getattr(args, 'root', None) or ROOT
     conn.execute('BEGIN')
     for i, item in enumerate(items):
         qid = item.get('id')
@@ -651,6 +900,12 @@ def cmd_patch_answer(conn, args, dry=False):
             if not ok_a:
                 errs.append(f'{where} 解析闸拒收：' + '；'.join(es_a))
                 continue
+        # 🔴 X7 figure 悬空指针闸（答案/解析同样受闸）
+        fe = figure_ref_errors(conn, [('answer_blocks', ans), ('analysis_blocks', ana)],
+                               root, where)
+        if fe:
+            errs += fe
+            continue
         conn.execute(
             'UPDATE question SET answer_blocks_json=?, '
             'analysis_blocks_json=COALESCE(?, analysis_blocks_json), updated_at=? WHERE id=?',
@@ -677,6 +932,8 @@ def cmd_patch_answer(conn, args, dry=False):
 def main():
     ap = argparse.ArgumentParser(description='自产题回流入库轻通路（过三闸才算出完）')
     ap.add_argument('--db', default=str(DEFAULT_DB))
+    ap.add_argument('--root', default=str(ROOT),
+                    help='rel_path 的解析根（缺省 v2 根）——沙盘用副本资产树时才传')
     sub = ap.add_subparsers(dest='cmd', required=True)
     for name in ('ingest', 'check'):
         s = sub.add_parser(name)
@@ -703,6 +960,15 @@ def main():
     s.add_argument('--id', type=int, required=True)
     s.add_argument('--note', help='审核结论（追加进 note，不覆盖机械判定原文）')
     s.add_argument('--reject', action='store_true', help='驳回（→已驳回）而非通过（→已处理）')
+    s = sub.add_parser('asset-add', help='🔴 asset 域唯一正式写入门（落位+登记，hash 复算不信文件名）')
+    s.add_argument('--file', help='源图（复算 sha256 → 拷进 <资产根>/<hash前2>/<hash><后缀> → 插行）')
+    s.add_argument('--rel-path', dest='rel_path',
+                   help='已在位的相对 v2 根路径（复算 sha256 与文件名核符 → 只插行不搬文件）')
+    s.add_argument('--kind', default='figure',
+                   help=f'资产类别 {ASSET_KINDS}（值域闸在工具里判，好让拒收也落 skill_log）')
+    s.add_argument('--asset-root', dest='asset_root', default=str(DEFAULT_ASSET_ROOT),
+                   help='资产根（缺省 知识库/资产；必须在 v2 根内）——只对 --file 态有意义')
+    s.add_argument('--meta', help='meta_json（JSON 对象字符串：来源/卷/题号/裁剪框 等）')
     args = ap.parse_args()
 
     t0 = time.time()
@@ -720,6 +986,8 @@ def main():
             digest, detail, code = cmd_tickets(conn, args)
         elif args.cmd == 'ticket-done':
             digest, detail, code = cmd_ticket_done(conn, args)
+        elif args.cmd == 'asset-add':
+            digest, detail, code = cmd_asset_add(conn, args)
         else:
             digest, detail, code = cmd_promote(conn, args)
         log_skill(conn, args.cmd, digest, '成功' if code == 0 else '失败', detail, t0)

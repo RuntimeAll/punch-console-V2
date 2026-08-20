@@ -31,6 +31,11 @@ import ingest_flow as F                              # noqa: E402
 from init_db import SEED                             # noqa: E402
 
 SCHEMA = LIB / 'schema_kb.sql'
+# 1×1 透明 PNG（沙盘资产实体：图指针闸要文件真在盘上）
+PNG_1PX = bytes.fromhex(
+    '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4'
+    '890000000a49444154789c6360000002000100ffff03000006000557bfabd400'
+    '00000049454e44ae426082')
 
 
 # ── 沙盘库：真 DDL + 真 seed + 一小截首枝 ──────────────────────────────
@@ -47,11 +52,16 @@ def build_sandbox(tmpdir):
         [('001', '人教七上', None, '版本', 1, '现行'),
          ('001001', '有理数', '001', '单元', 1, '现行'),
          ('001001001', '有理数混合运算', '001001', '考点', 1, '现行')])
-    # figure 块只查 asset 字段存在不查库；这里仍落几行真 asset，免得将来闸加严时测试假绿
+    # 🔴 2026-08-20 起 figure 悬空指针闸（X7）要求「asset 表有行 + 文件真在盘」：
+    #    沙盘落真行 + 在 tmpdir 里落真 PNG 文件（root=tmpdir，绝不碰主位 知识库/资产/）。
     conn.executemany(
         'INSERT INTO asset(hash,kind,rel_path,meta_json,created_at) VALUES (?,?,?,?,?)',
         [(h, 'figure', f'知识库/资产/{h}.png', None, '2026-08-19')
          for h in ('fa01', 'fa02', 'fa03', 'fa04', 'fa05', 'fa06', 'fa07', 'fa08')])
+    adir = Path(tmpdir) / '知识库' / '资产'
+    adir.mkdir(parents=True, exist_ok=True)
+    for h in ('fa01', 'fa02', 'fa03', 'fa04', 'fa05', 'fa06', 'fa07', 'fa08'):
+        (adir / f'{h}.png').write_bytes(PNG_1PX)
     conn.commit()
     return conn
 
@@ -118,7 +128,8 @@ def run_pack(conn, tmpdir, it, skip_review):
     # 冷载一次 bge（十几秒 × 十几条），把一套 1 秒的测试拖成几分钟。
     # 🔴 入库收尾增量向量的正主自证在 工具箱/检索/serve_test.py（走 serve / 冷载 / 都不在 三态全测）。
     args = argparse.Namespace(pack=str(pack), partial=False, allow_dup=False,
-                              skip_review=skip_review, no_vec=True, serve_port=None)
+                              skip_review=skip_review, no_vec=True, serve_port=None,
+                              root=str(tmpdir))    # 沙盘副本资产树（figure 悬空闸的解析根）
     buf = io.StringIO()
     with redirect_stdout(buf):
         _, _, code = F.cmd_ingest(conn, args, dry=False)

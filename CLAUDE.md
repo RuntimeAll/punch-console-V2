@@ -33,7 +33,7 @@
 | `console/` | 展示台代码（React19+antd5+Vite，:4300） | 挂账+展示+终审，页面只读写归 agent |
 | `工具箱/` | 生产工具代码：切割器/渲染链/DSL/验算闸/KG 工具 | 代码空间只放代码 |
 | `.claude/skills/` | v2 skill hub（编制表=其 README） | 每次执行落 skill_log（D-15） |
-| `punch-console/` | 🔴 **冻结只读参考·待退役**（2026-08-19 PRD-003 用户拍板并入 v2）：功能归 console/，数据吃进 kb.db；`知识库/资料库.db` 吃完冻结为历史存档永久只读；:3000 不再起 | 代码/仓/库零变更；embed 模型权重（embed/models）继续复用 |
+| `punch-console/` | 🔴 **代码冻结·转任只读手机展示台**（2026-08-20 用户改判，取代"待退役"）：:3000 用 next start 起服，数据=`知识库/资料库-投影.db`（工具箱/桥/投影同步.py 从 kb.db 单向重建，冻结的 资料库.db 仍是历史存档只读）；桌面工厂控制台=:4300，资料/物料/发布展示（含手机）=:3000 | 代码/仓零变更（仅 web/.env.local 配置）；手机上改人工态会被同步覆盖，真改动走 :4300/agent |
 | `试验场/` | POC/战役目录（带日期） | 用完挪归档 |
 | `codeplace/` | git worktree 停车场（2026-08-19 用户定名，替代旧 `开发位/`） | 见 §2 |
 | `password/` | 凭据 | 🔴 永不入 git |
@@ -83,7 +83,8 @@ cd D:\workplace\ai-bkb-v2\console; pnpm exec vite --port 4300 --strictPort --hos
 # 探活（本机有代理必须 --noproxy）
 curl.exe -s -o NUL -w "%{http_code}" --noproxy "*" http://127.0.0.1:4300/
 # 读 API + 语意 serve（常驻一对，启动台幂等管）：python 工具箱\启动台.py（--status 只探活 / --stop 全停）
-# （punch-console :3000 已冻结待退役——PRD-003 并入 v2，不再起服务；资料库.db 只读存档）
+# 手机展示台（punch-console 投影，2026-08-20 改判转任）：数据重建 python 工具箱\桥\投影同步.py；
+# 起服 punch-console\web\serve-v2.ps1（next start :3000，换库须重启进程）；冻结的 资料库.db 仍只读存档
 # Chrome 截图/出 PDF（撞正开着的 Chrome 会静默不写文件）
 # --headless=new --disable-gpu --no-proxy-server --user-data-dir=<临时profile>，截完 sleep 再验文件存在
 ```

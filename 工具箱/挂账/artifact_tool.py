@@ -139,10 +139,11 @@ def cmd_files(conn, args):
 
 def cmd_status(conn, args):
     _need(conn, args.id)
-    if args.to not in ('在产', '已交付', '已上架'):
+    if args.to not in ('在产', '已交付', '已上架', '退役'):
         sys.exit(f'🔴 状态 {args.to!r} 非法')
+    # 退役=账面下线不物理删（PRD-008 §一③ 清理口径）：不补 delivered_at（没交付过的孤儿不许伪造交付时间）
     conn.execute('UPDATE artifact SET status=?, delivered_at=COALESCE(delivered_at, ?) WHERE id=?',
-                 (args.to, now() if args.to != '在产' else None, args.id))
+                 (args.to, now() if args.to in ('已交付', '已上架') else None, args.id))
     conn.commit()
     print(f'{args.id} → {args.to}')
     return args.id, args.to

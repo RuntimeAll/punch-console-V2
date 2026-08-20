@@ -34,11 +34,22 @@ figure 的 asset 怎么落到文件（2026-08-20 实装，口径见 §一·五 A
   · figure 的 rel_path 是绝对路径或跳出资产根（文件指针一律相对）
   · table 块既无 md 也无 rows / GFM 无 |---| 分隔行 / 列数对不上 / 单元格被拍平成字符串
   · text 块的 md 里夹 GFM 表（表要用 table 块，混在正文里会印成一堆竖线）
-  · expr/oral 槽位的题面里出现 figure/table（那两个槽只吃一条算式，图表题走 fill/word/choice）
+  · expr/oral/equation 槽位的题面里出现 figure/table（这三个槽只吃一条算式/方程，
+    图表题走 fill/word/word_multi/choice）
+  · equation 槽的题面不是「纯公式且正好一个顶层 =」（劈不出左右两边，劈了必丢字）
   · item.section 不在该 paper 的 layout.sections 里
   · 解析的「＝」行不是纯公式（中文不许混进 LaTeX —— 渲染出件 SKILL.md §4）
-  · expr/oral 槽位既无解析＝链也无答案公式（会出一份没有答案的答案卷）
+  · expr/oral/equation 槽位既无解析算式行也无答案公式（会出一份没有答案的答案卷）
+  · word_multi 槽位既无解析行也无答案行（答案卷整题空白）
   · 单节题数 > 10（渲染器答案卷圈码只有 ①~⑩）
+
+槽位实装全集（= renderers/math.py SLOTS 全集，2026-08-20 补齐最后两个）
+------------------------------------------------------------------
+    expr / oral      一条算式，答案卷挂＝链          （计算题 q7）
+    equation         一条方程，答案卷「解：」逐步    （解方程类 q7）
+    fill / choice    填空 / 选择                     （q4 / q1）
+    word             文字题，答案卷一条＝链+答语     （算术型应用题 q3）
+    word_multi       文字题，答案卷逐行解答+答语     （多小问 / 设未知数：q3 / q5）
 """
 import argparse
 import html as _html
@@ -639,6 +650,36 @@ def chain_lines(analysis, answer, where='?', assets=None):
     return lead, [], '无'
 
 
+def solve_lines(analysis, answer, where='?', assets=None):
+    """解方程的**逐步行**（`equation` 槽用）。返回 (lines, 来源说明)。
+
+    🔴 与 `chain_lines` 的分工，别混：
+       ＝链把 `A=B=C` 在顶层 `=` 处**切开**（脱式一步一段，渲染器再用「＝」串起来）；
+       解方程的每一步**本身就是一条方程**（`3(x+1)=2(x+2)` → `3x+3=2x+4` → `x=1`），
+       切开就散架成六个碎片 —— 本函数**整行取，一个等号都不动**。
+    · 解析里的纯公式行按序成 lines（行首写了「＝/=」的先剥掉行首等号，与 ＝链同款写法）；
+    · 中文与公式混排的说明行跳过（只取算式，与 ＝链同口径）；
+    · 一条都没有 → 退到答案的首个公式，至少让答案卷有答案。
+    """
+    lines = []
+    for ln in md_lines(analysis, where + '.解析', assets):
+        if isinstance(ln, Html):
+            print('  ⚠️ [%s.解析] 有一个 %s 块 —— 解方程逐步行只收算式行，该块不进答案卷'
+                  % (where, ln.kind))
+            continue
+        s = ln[1:].strip() if ln[0] in '＝=' else ln
+        t = pure_formula(s, where + '.解析')
+        if t is not None:
+            lines.append(t)
+    if lines:
+        return lines, '解析逐步行%d行' % len(lines)
+    for ln in md_lines(answer, where + '.答案', assets):
+        t = first_formula(ln, where + '.答案')
+        if t is not None:
+            return [t], '答案首式（解析无算式行）'
+    return [], '无'
+
+
 def stem_for_answer(stem_ls, where='?'):
     """题面行 → **答案卷版**题面 HTML 行。
 
@@ -684,6 +725,66 @@ def adapt_item(item, slot, where='?', assets=None):
             lines = [lead] + lines
         return {'stem': Tex(stem_tex(stem_ls[0], where + '.题面')),
                 'lines': lines, '_src': src}
+
+    if slot == 'equation':
+        # 🔴 解方程槽（2026-08-20 实装，PRD-008 §一②-3）：题目卷渲「左边 = 右边」一行，
+        #    答案卷首行「解：」再逐步挂（renderers/math.py equation 契约：lhs/rhs 各要
+        #    一个带 `.h` 的对象，lines 是**整条方程**的字符串列表）。
+        #    与 expr/oral 同族 —— 只渲一条方程，题面有图/表说明选错槽了，拒渲不静默丢。
+        bad = [x.kind for x in stem_ls if isinstance(x, Html)]
+        if bad:
+            raise PackError('[%s] equation 槽的题面里有 %s 块 —— 该槽只渲一条方程，图表题请走 '
+                            'fill / word_multi / choice 槽，拒渲不静默丢' % (where, '/'.join(bad)))
+        pure = pure_formula(stem_ls[0], where + '.题面')
+        if pure is None:
+            raise PackError('[%s] equation 槽的题面不是一条纯方程：%s —— 本槽要把题面按顶层「=」'
+                            '劈成左右两边分别渲，带中文说明/指令词的题面劈不了'
+                            '（劈了必丢字），请走 fill / word_multi 槽，拒渲'
+                            % (where, str(stem_ls[0])[:50]))
+        sides = split_eq_chain(pure)
+        if len(sides) != 2:
+            raise PackError('[%s] equation 槽的题面有 %d 个顶层「=」段（要正好 2：左边=右边）：%s '
+                            '—— 多段方程链请走 expr 槽，拒渲' % (where, len(sides), pure[:60]))
+        lines, src = solve_lines(ana_blocks, ans_blocks, where, assets)
+        if not lines:
+            raise PackError('[%s] 解方程题既无解析算式行也无答案公式 —— 答案卷会没有答案，拒渲' % where)
+        return {'lhs': Tex(sides[0]), 'rhs': Tex(sides[1]), 'lines': lines, '_src': src}
+
+    if slot == 'word_multi':
+        # 🔴 应用题·多行解答槽（2026-08-20 实装，PRD-008 §一②-3）：
+        #    题目卷=题面段落（与 word 同、答案卷不重印，省纸口径天然成立）；
+        #    答案卷=解析**逐行各自成行**，不压成一条＝链 —— 这正是它与 word 的分野
+        #    （renderers/math.py：word 是"一条＝链+答语"，word_multi 是"设未知数/列方程/
+        #    分小问"那类逐行解答）。
+        # 🔴 契约：lines 元素是**已渲好的最终 HTML 串**，所以 md→定界串在这里就位，
+        #    绝不留裸 md 给渲染器再解析一遍（存取同构，没有回转层）。
+        raw_ana = md_lines(ana_blocks, where + '.解析', assets)
+        raw_ans = md_lines(ans_blocks, where + '.答案', assets)
+        if raw_ana:
+            lines = [md_to_delim(x, where + '.解析') for x in raw_ana]
+            ansline = '<br>'.join(md_to_delim(x, where + '.答案') for x in raw_ans) or '答：见解析。'
+            src = '解析%d行' % len(lines)
+        elif raw_ans:
+            # 🔴 无解析态：答案行**直接当解答过程**，答语行留空不把同一段再印一遍
+            #    （空的 .ln ind 是零高块，版面上不留痕）。绝不静默出一份空白解答。
+            lines = [md_to_delim(x, where + '.答案') for x in raw_ans]
+            ansline = ''
+            src = '答案%d行（解析缺失）' % len(lines)
+        else:
+            raise PackError('[%s] word_multi 槽既无解析行也无答案行 —— 答案卷会整题空白，拒渲' % where)
+        # 🔴 末步着色（与 expr/word/oral 同口径，先着色再挂「解：」免得盖掉前缀）：
+        #    只有末行**是纯公式**才着色 —— 整句话染红不是卷面惯例
+        #    （word 的答语行也是黑的），混排行原样黑字。
+        tail = (raw_ana or raw_ans)[-1]
+        tex = pure_formula(tail, where + '.末步')
+        if tex is not None:
+            lines[-1] = '\\(\\color{%s}{%s}\\)' % (renderers.get('math').ANSWER_COLOR, tex)
+        # 首行挂「解：」（真卷解答题的固定起手式，与 renderers/math.py equation 同款）；
+        # 🔴 库里已自带「解：」的不重复挂 —— 存取同构，写什么印什么。
+        if not lines[0].startswith(('解：', '解:')):
+            lines[0] = '解：' + lines[0]
+        return {'text': '<br>'.join(md_to_delim(x, where + '.题面') for x in stem_ls),
+                'lines': lines, 'ansline': ansline, '_src': src}
 
     if slot == 'word':
         lead, lines, src = chain_lines(ana_blocks, ans_blocks, where, assets)
@@ -801,7 +902,9 @@ def adapt_item(item, slot, where='?', assets=None):
         return {'text': '<br>'.join(stem_html), 'options': options, 'opt_cols': opt_cols,
                 'ans': ansline, '_src': '答案' if raw else '无答案态'}
 
-    raise PackError('[%s] 槽位 %r 本版未实装（已实装：expr / oral / word / fill / choice）' % (where, slot))
+    raise PackError('[%s] 槽位 %r 本版未实装（已实装：expr / oral / equation / word / '
+                    'word_multi / fill / choice —— 即 renderers/math.py SLOTS 全集）'
+                    % (where, slot))
 
 
 # ══════════════════════════════════════════════════════════════════════

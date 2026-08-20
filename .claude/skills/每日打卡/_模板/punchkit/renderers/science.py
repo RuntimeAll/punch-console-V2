@@ -24,7 +24,8 @@ punchkit.renderers.science —— 科学题型渲染器
   都是 `'通用'`——分几节、有没有边框、留白怎么分，与学科无关。**不要为科学再造骨架。**
 - **答案标记不用走 MathJax**：科学题面多半不含公式，普通 `<b class="a">` 就能加粗着色，
   没有数学那个「MathJax 不吃外层 CSS」的限制。
-  🔴 **但新标记必须补进 `core.ANSWER_ONLY_MARKS`**，否则「题目卷不泄答案」那道闸对科学失效。
+  🔴 **但新标记必须补进 `core.ANSWER_ONLY_CLASSES`**，否则「题目卷不泄答案」那道闸对科学失效
+  （`class="a"` 已于 2026-08-20 补登记）。
 
 ## 下面是占位实现
 
@@ -51,7 +52,8 @@ def head(ctx=None):
 
 def answer_mark(html):
     """🔴 科学不走 MathJax，普通标签即可。
-    但这个标记必须同时补进 core.ANSWER_ONLY_MARKS，否则泄答案闸失效。"""
+    class="a" **已登记进 core.ANSWER_ONLY_CLASSES**（2026-08-20 补——此前只在注释里
+    写着"必须补进去"而实际没补，闸对科学整个失效，正是"注释谎言"那一类）。"""
     return '<b class="a">%s</b>' % html
 
 

@@ -26,7 +26,7 @@ punchkit.layouts —— 版式注册表（🔴 造新册时**先来这里选**�
 | `css(pt=None)` | fn → str | 解析好的 CSS |
 | `render_card(i, data, ans, ctx)` | fn → html | 渲一张卡（= 一天；一页两纸条时 = 一页） |
 | `guard(html, days, ctx)` | fn，可选 | 骨架自己的闸（如版面宽度估算），只在题目卷跑 |
-| `EXTRA_LEAK_MARKS` | tuple，可选 | 该骨架独有的答案卷专有标记 |
+| `EXTRA_LEAK_MARKS` | tuple，可选 | 该骨架独有的答案卷专有标记（**裸串比对**，只填渲染层注入物，别填「解：」这类题面正当词——口径见 core.py §⑥） |
 
 `SPEC` 必填：`key / name / 学科 / 长相 / 适合 / 每页 / 槽位 / 数据形状 / 用过的册`。
 

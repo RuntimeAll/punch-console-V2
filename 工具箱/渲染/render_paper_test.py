@@ -175,11 +175,9 @@ def unit():
     it2 = {'question': {'blocks': B('$36\\div 4$'), 'answer_blocks': B('$9$')}}
     d2 = RP.adapt_item(it2, 'oral', 'T')
     ok('oral 槽位：stem + 末行答案', d2['stem'].h == '36\\div 4' and d2['lines'] == ['9'])
-    try:
-        RP.adapt_item(it2, 'equation', 'T')
-        ok('未实装槽位拒渲', False, '没抛错')
-    except RP.PackError:
-        ok('未实装槽位拒渲', True)
+    # 🔴 槽位全集已补齐（equation/word_multi 2026-08-20 实装），这里拿一个**真不存在**的
+    #    槽名钉「未实装必拒」，别再拿已实装的槽当反例（会拒得对、理由却是错的）。
+    raises('未实装槽位（judge）', lambda: RP.adapt_item(it2, 'judge', 'T'), '本版未实装')
 
 
 # ══════════════ 二、正例出件 ══════════════
@@ -239,6 +237,263 @@ def unit_choice():
                             {'type': 'text', 'role': '答案', 'md': 'A'}]}]}}}
     d2 = RP.adapt_item(it2, 'choice', 'T')
     ok('choice 槽·有答案带答案', d2['ans'] == 'A' and d2['_src'] == '答案')
+
+
+# ══════════════ 一·五、equation / word_multi 两槽（2026-08-20 补齐最后两个） ══════════════
+# 🔴 库口径取样（试验场/2026-08-20-收尾战役/kb-快照.db 只读副本，一个字节没写主位）：
+#    · qtype 域九档 q1..q9；实存 q7 计算 384 / q1 选择 270 / q5 解答 173 /
+#      q4 填空 162 / q3 应用 56 / q6 作图 2；
+#    · 解方程类题面 = **一条纯方程**（`$\frac{x-m}{2} = \frac{x-n}{3}$`），
+#      解析是**逐条方程**（`3(x+1)=2(x+2)` → `3x+3=2x+4` → `x=1`）—— 一个等号都不能切；
+#    · q3/q5 多小问题解析 = **逐行步骤**（一 cell 一行），答案是一整行「(1)…；(2)…；(3)…」。
+def unit_equation_wordmulti(root, db):
+    print('\n── equation / word_multi 两槽单测（形状取自 kb 快照） ──')
+    A = RP.AssetResolver(db=db, root=root)
+    M = RP.renderers.get('math')
+    B = lambda md: {'v': 2, 'rows': [{'cells': [{'type': 'text', 'md': md}]}]}       # noqa: E731
+    ROWS = lambda *ms: {'v': 2, 'rows': [{'cells': [{'type': 'text', 'md': m}]}      # noqa: E731
+                                         for m in ms]}
+
+    # ── equation 正例 ──
+    it = {'question': {'blocks': B('$2x+1=5$'),
+                       'analysis_blocks': ROWS('$2x=5-1$', '$2x=4$', '$x=2$'),
+                       'answer_blocks': B('$x=2$')}}
+    d = RP.adapt_item(it, 'equation', 'T')
+    ok('equation 正例：题面按顶层「=」劈成左右两边',
+       d['lhs'].h == '2x+1' and d['rhs'].h == '5', repr(d)[:120])
+    ok('🔴 equation 正例：解题步骤整行取，等号一个不切',
+       d['lines'] == ['2x=5-1', '2x=4', 'x=2'] and d['_src'].startswith('解析逐步行'),
+       repr(d['lines']))
+    ok('对照：同一步进 ＝链会被切成两段（所以解方程必须另走 solve_lines）',
+       RP.split_eq_chain('2x=4') == ['2x', '4'])
+    df = RP.adapt_item({'question': {'blocks': B('$x^{2}=9$'),
+                                     'analysis_blocks': ROWS('由平方根定义得 $x=\\pm 3$'),
+                                     'answer_blocks': B('$x_{1}=3$')}}, 'equation', 'T')
+    ok('equation：解析全是混排说明行 → 退到答案首式（答案卷不会空）',
+       df['lines'] == ['x_{1}=3'] and df['_src'].startswith('答案首式'), repr(df))
+    d2 = RP.adapt_item({'question': {'blocks': B('$\\frac{x-1}{2}=\\frac{x+2}{3}$'),
+                                     'analysis_blocks': ROWS('＝$3(x-1)=2(x+2)$', '$x=7$')},
+                        }, 'equation', 'T')
+    ok('equation：行首写「＝」的解析行剥掉行首等号后整行取',
+       d2['lines'] == ['3(x-1)=2(x+2)', 'x=7'], repr(d2['lines']))
+
+    # ── equation 反例 ──
+    raises('equation 题面带指令词不是纯方程',
+           lambda: RP.adapt_item({'question': {'blocks': B('解方程：$2x+1=5$'),
+                                               'answer_blocks': B('$x=2$')}}, 'equation', 'T'),
+           '纯方程')
+    raises('equation 题面顶层「=」段数不是 2（多段链）',
+           lambda: RP.adapt_item({'question': {'blocks': B('$2x+1=5=6$'),
+                                               'answer_blocks': B('$x=2$')}}, 'equation', 'T'),
+           '正好 2')
+    raises('equation 题面根本没有等号',
+           lambda: RP.adapt_item({'question': {'blocks': B('$36\\div 4$'),
+                                               'answer_blocks': B('$9$')}}, 'equation', 'T'),
+           '正好 2')
+    raises('equation 题面里有图（该槽只渲一条方程）',
+           lambda: RP.adapt_item({'question': {'blocks': {'v': 2, 'rows': [
+               {'cells': [{'type': 'text', 'md': '$2x+1=5$'}]},
+               {'cells': [{'type': 'figure', 'asset': FIG_HASH, 'width': '40%'}]}]},
+               'answer_blocks': B('$x=2$')}}, 'equation', 'T', A), 'word_multi')
+    raises('equation 既无解析算式行也无答案公式',
+           lambda: RP.adapt_item({'question': {'blocks': B('$2x+1=5$'),
+                                               'analysis_blocks': ROWS('先移项再合并')}},
+                                 'equation', 'T'), '没有答案')
+
+    # ── equation 接得上渲染器 ──
+    ha = M.equation(d, 0, True, None)
+    ok('equation 接得上渲染器：答案卷首行「解：」+ 逐步 + 末步着色',
+       'class="ln ind">解：' in ha and ha.count('class="ln ind"') == 3
+       and '\\color{' in ha, ha[:120])
+    hq = M.equation(d, 0, False, None)
+    ok('equation 题目卷只印方程一行，零答案容器类零着色',
+       '\\(2x+1=5\\)' in hq and not RP.core.answer_class_hits(hq)
+       and '\\color{' not in hq and '解：' not in hq, hq[:120])
+
+    # ── word_multi 正例 ──
+    itw = {'question': {
+        'blocks': ROWS('王先生乘电梯，上下楼层依次记作 $+6$，$-3$，$+10$．',
+                       '（1）最后是否回到出发点？\n（2）电梯共运行多少层？'),
+        'analysis_blocks': ROWS('（1）$(+6)+(-3)+(+10)=13$，净上升 $13$ 层，没回到出发点',
+                                '（2）取各记录绝对值之和 $6+3+10=19$（层）',
+                                '核验：净位移 $13$ 与总层数 $19$ 不同，符合往返'),
+        'answer_blocks': B('（1）没有回到出发点；（2）$19$ 层')}}
+    dw = RP.adapt_item(itw, 'word_multi', 'T')
+    ok('word_multi 正例：解析逐行各自成行（不压成一条＝链）',
+       len(dw['lines']) == 3 and dw['_src'] == '解析3行', repr(dw['lines'])[:160])
+    ok('🔴 word_multi 正例：首行挂「解：」+ 全行已渲成定界串（渲染器不再解析一遍）',
+       dw['lines'][0].startswith('解：') and '\\(' in dw['lines'][0]
+       and '$' not in ''.join(dw['lines']), repr(dw['lines'][0])[:120])
+    ok('word_multi 正例：答语行取答案块', '19' in dw['ansline'] and '\\(' in dw['ansline'])
+    dw2 = RP.adapt_item({'question': {'blocks': B('求 $x$．'),
+                                      'analysis_blocks': ROWS('解：设 $x$ 为所求', '$x=3$'),
+                                      'answer_blocks': B('$x=3$')}}, 'word_multi', 'T')
+    ok('word_multi：库里自带「解：」不重复挂（存取同构）',
+       dw2['lines'][0].startswith('解：设') and '解：解：' not in dw2['lines'][0],
+       repr(dw2['lines'][0]))
+    ok('word_multi：末行是纯公式 → 着色（与 expr/word 同口径）',
+       dw2['lines'][-1] == '\\(\\color{%s}{x=3}\\)' % M.ANSWER_COLOR, repr(dw2['lines'][-1]))
+    ok('🔴 word_multi：末行是中文混排句 → 不着色（整句染红不是卷面惯例）',
+       '\\color{' not in ''.join(dw['lines']), repr(dw['lines'][-1])[:80])
+    ok('word_multi：末行着色不盖掉「解：」前缀（单行解答的边界）',
+       RP.adapt_item({'question': {'blocks': B('求 $x$．'),
+                                   'analysis_blocks': B('$x=3$')}},
+                     'word_multi', 'T')['lines'][0]
+       == '解：\\(\\color{%s}{x=3}\\)' % M.ANSWER_COLOR)
+    dw3 = RP.adapt_item({'question': {'blocks': B('求 $7$ 名学生的平均体重．'),
+                                      'analysis_blocks': None,
+                                      'answer_blocks': ROWS('（1）学生 $4$', '（2）$11$ 千克')}},
+                        'word_multi', 'T')
+    ok('🔴 word_multi 无解析态：答案行当解答过程，答语行留空不把同段再印一遍',
+       len(dw3['lines']) == 2 and dw3['lines'][0].startswith('解：')
+       and dw3['ansline'] == '' and dw3['_src'] == '答案2行（解析缺失）', repr(dw3))
+    gfm = {'type': 'table', 'md': '| 学生 | 差 |\n| --- | --- |\n| $1$ | $-5$ |'}
+    dwt = RP.adapt_item({'question': {'blocks': {'v': 2, 'rows': [
+        {'cells': [{'type': 'text', 'md': '看表求平均体重：'}]}, {'cells': [gfm]}]},
+        'analysis_blocks': ROWS('平均差 $=-5$，平均体重 $=45-5=40$'),
+        'answer_blocks': B('$40$ 千克')}}, 'word_multi', 'T', A)
+    ok('word_multi：题面带表照收（该槽答案卷本就不重印题面，不触省纸口径）',
+       '<table class="tbl">' in dwt['text'] and len(dwt['lines']) == 1)
+    dwf = RP.adapt_item({'question': {'blocks': B('在数轴上表示 $A$、$B$．'),
+        'analysis_blocks': {'v': 2, 'rows': [
+            {'cells': [{'type': 'text', 'md': '如图所示：'}]},
+            {'cells': [{'type': 'figure', 'asset': FIG_HASH, 'width': '40%'}]}]},
+        'answer_blocks': B('见图')}}, 'word_multi', 'T', A)
+    ok('word_multi：解析里的图原样进解答行（＝链会把它整块丢掉）',
+       any('<img class="fig"' in x for x in dwf['lines']), repr(dwf['lines'])[:140])
+    raises('word_multi 既无解析行也无答案行',
+           lambda: RP.adapt_item({'question': {'blocks': B('求 $x$．')}}, 'word_multi', 'T'),
+           '整题空白')
+
+    # ── word_multi 接得上渲染器 ──
+    hwa = M.word_multi(dw, 0, True, None)
+    ok('word_multi 接得上渲染器：首行 .ln + 其余逐行 .ln ind + 答语行',
+       hwa.count('class="ln ind"') == 3 and 'class="ln"' in hwa and '解：' in hwa, hwa[:0])
+    hwq = M.word_multi(dw, 0, False, None)
+    ok('word_multi 题目卷=题面段落，零答案容器类且不泄解答',
+       'class="app"' in hwq and not RP.core.answer_class_hits(hwq)
+       and '解：' not in hwq and '\\color{' not in hwq, hwq[:0])
+
+
+# ══════════════ 一·六、泄答案闸白名单口径（PRD-008 §一②-3 第一件） ══════════════
+# 🔴 新口径 = **只拦渲染器注入的答案元素**（着色/加粗宏 + 答案容器类），
+#    **不拦题面 md 原文里固有的「解：」「答：」**。
+# 正例素材 = 2026-08-20 窗G 实拦的那两道讲义阅读理解题（原文节选自 kb 快照）：
+#    · U1·2 型（q20260820419dcf11）：「…他采用了如下的"整体代换"的方法：\n解：根据题意…」
+#    · MIX·3 型（q20260820a438cb8a）：「…这种做法正确吗？答：______．」
+STEM_JIE = ('小明在做作业时遇到这样一道题：若 $x^{2}-x-4=5$，求 $2x^{2}-2x+3$ 的值，'
+            '他采用了如下的“整体代换”的方法：\n'
+            '解：根据题意，得 $x^{2}-x-4=5$，则有 $x^{2}-x=9$．\n'
+            '则 $2x^{2}-2x+3=2(x^{2}-x)+3=21$．')
+STEM_DA = ('阅读下列材料，计算 $50 \\div \\left(\\frac{1}{3}-\\frac{1}{4}\\right)$．\n'
+           '(1) 解法 1 思路：原式 $=50 \\div \\frac{1}{3}-50 \\div \\frac{1}{4}$；'
+           '这种做法正确吗？答：______．\n'
+           '(2) 计算：$\\frac{7}{8} \\div \\frac{1}{4}=$ ______．')
+
+
+def leak_ok(name, html, extra=()):
+    """正例：题目卷这段 HTML **必须放行**（误拦=出不了卷）。"""
+    try:
+        RP.core.leak_guard(html, extra)
+        ok('放行：' + name, True)
+    except AssertionError as e:
+        ok('放行：' + name, False, str(e)[:110])
+
+
+def leak_bad(name, html, kw=None, extra=()):
+    """反例：真泄漏**必须仍被拦**，且拦的理由对得上。"""
+    try:
+        RP.core.leak_guard(html, extra)
+        ok('拦下：' + name, False, '没抛错（放宽了真泄漏面）')
+    except AssertionError as e:
+        ok('拦下：' + name, (kw in str(e)) if kw else True, str(e)[:110])
+
+
+def unit_leak_guard():
+    print('\n── 泄答案闸·白名单口径单测（PRD-008 §一②-3） ──')
+    C, M = RP.core, RP.renderers.get('math')
+    B = lambda md: {'v': 2, 'rows': [{'cells': [{'type': 'text', 'md': md}]}]}       # noqa: E731
+
+    ok('口径①：判定两表里不再有裸词「解：」「答：」',
+       C.STEM_LEGIT_WORDS == ('解：', '答：')
+       and not [w for w in C.STEM_LEGIT_WORDS
+                if w in C.ANSWER_ONLY_TEX or w in C.ANSWER_ONLY_CLASSES],
+       repr(C.ANSWER_ONLY_TEX + C.ANSWER_ONLY_CLASSES))
+    ok('口径②：判定表全是渲染层注入物（宏 2 条 + 容器类 5 条）',
+       C.ANSWER_ONLY_TEX == ('\\color{', '\\mathbf{')
+       and set(C.ANSWER_ONLY_CLASSES) == {'ln', 'st', 'app-sol', 'ansv', 'a'},
+       repr(C.ANSWER_ONLY_CLASSES))
+
+    # ── 正例：窗G 两道被误拦的题型，题面固有「解：/答：」一律放行 ──
+    qj = M.fill(RP.adapt_item({'question': {'blocks': B(STEM_JIE),
+                                            'answer_blocks': B('$21$')}}, 'fill', 'T'),
+                0, False, None)
+    qd = M.fill(RP.adapt_item({'question': {'blocks': B(STEM_DA),
+                                            'answer_blocks': B('$-3$')}}, 'fill', 'T'),
+                1, False, None)
+    ok('正例素材真的带着那两个词（否则放行是假绿）',
+       '解：根据题意' in qj and '答：______' in qd, repr(qj)[:80])
+    leak_ok('🔴 正例① 窗G U1·2 型：题面固有「解：」的阅读理解讲义题', qj)
+    leak_ok('🔴 正例② 窗G MIX·3 型：题面固有「答：___」作答提示位', qd)
+    leak_ok('正例③：两道题同在一张题目卷（整卷级放行）',
+            '<body class="qsheet">%s%s</body>' % (qj, qd))
+    leak_ok('正例④：题面写「答：见解析」这类字样也放行（题面原文即正当内容）',
+            '<div class="app">下列解法对吗？答：见解析。</div>')
+
+    # ── 反例：渲染层注入物一条都不许放过 ──
+    RED = M.ANSWER_COLOR
+    leak_bad('答案着色宏 \\color{ 进题目卷',
+             '<div>\\(3+5=\\color{%s}{8}\\)</div>' % RED, '\\color{')
+    leak_bad('答案加粗宏 \\mathbf{ 进题目卷', '<div>\\(\\mathbf{8}\\)</div>', '\\mathbf{')
+    leak_bad('填空答案 ansv 进题目卷',
+             '<div>括号里填几　<span class="ansv" style="color:%s">\\(5\\)</span></div>' % RED,
+             'ansv')
+    leak_bad('答案卷过程行容器 .ln 进题目卷', '<div class="ln">\\(2x=4\\)</div>', 'ln')
+    leak_bad('🔴 答案卷答语行 .ln ind 进题目卷（多类写法，旧闸整串比对抓不住）',
+             '<div class="ln ind">答：共 \\(5\\) 元．</div>', 'ln')
+    leak_bad('🔴 渲染器注入的「解：」行 .ln ind 进题目卷（放行裸词≠放行这一行）',
+             '<div class="ln ind">解：\\(x=2\\)</div>', 'ln')
+    leak_bad('.st 过程行进题目卷', '<div class="st">\\(=8\\)</div>', 'st')
+    leak_bad('.app-sol 应用题解答进题目卷', '<div class="app-sol">列式 \\(3\\times 5\\)</div>',
+             'app-sol')
+    leak_bad('🔴 科学 <b class="a"> 答案标记（此前只在注释里说登记了、实际没登记）',
+             '<p>气体是<b class="a">氧气</b></p>', 'class="a"')
+    leak_bad('骨架私有标记 EXTRA_LEAK_MARKS 照旧生效',
+             '<div>ANS-ONLY-MARK</div>', 'ANS-ONLY-MARK', extra=('ANS-ONLY-MARK',))
+
+    # ── 结构依据：每个槽的**答案卷**输出都必须带答案卷专有标记 ──
+    # 🔴 这一组不绿，白名单口径就不成立：渲染器注入的「解：/答：」会没有容器兜着，
+    #    摘掉裸词就真成了放宽。新增槽位漏挂标记在这里当场变红。
+    ROWS = lambda *ms: {'v': 2, 'rows': [{'cells': [{'type': 'text', 'md': m}]}      # noqa: E731
+                                         for m in ms]}
+    opt = lambda lb, md: {'type': 'option', 'label': lb,                             # noqa: E731
+                          'blocks': [{'type': 'text', 'md': md}]}
+    Q = lambda **kw: {'question': kw}                                                # noqa: E731
+    fixtures = [
+        ('oral', Q(blocks=B('$36\\div 4$'), answer_blocks=B('$9$'))),
+        ('expr', Q(blocks=B('$36\\div 4+2$'), analysis_blocks=B('$9+2=11$'))),
+        ('equation', Q(blocks=B('$2x+1=5$'), analysis_blocks=ROWS('$2x=4$', '$x=2$'))),
+        ('word', Q(blocks=B('共几元？'), analysis_blocks=B('＝$3\\times 5$\n＝$15$'),
+                   answer_blocks=B('共 $15$ 元'))),
+        ('word_multi', Q(blocks=B('共几层？'), analysis_blocks=ROWS('$6+3=9$', '共 $9$ 层'),
+                         answer_blocks=B('共 $9$ 层'))),
+        ('fill', Q(blocks=B('$3+\\square=8$'), answer_blocks=B('$5$'))),
+        ('choice', Q(blocks={'v': 2, 'rows': [{'cells': [
+            {'type': 'text', 'md': '负数是（　）'}, opt('A', '$-2$'), opt('B', '$3$')]}]},
+            answer_blocks=B('A'))),
+    ]
+    for slot, it in fixtures:
+        data = RP.adapt_item(it, slot, 'T')
+        ha = M.SLOTS[slot](data, 0, True, None)
+        marks = C.answer_marks_in(ha)
+        ok('闸覆盖·%s 槽答案卷输出带专有标记 %s' % (slot, marks), bool(marks), ha[:100])
+        leak_bad('闸覆盖·%s 槽的答案卷输出整段进题目卷' % slot, ha)
+        leak_ok('闸覆盖·%s 槽的题目卷输出本身放行' % slot, M.SLOTS[slot](data, 0, False, None))
+    dn = RP.adapt_item({'question': {'blocks': B('$1-2=$（　）'), 'answer_blocks': None}},
+                       'fill', 'T')
+    ok('闸覆盖·唯一无标记的形态=fill 无答案态「（待补答案）」（没有答案可泄，本就不需要标记）',
+       dn['ans'] == '（待补答案）'
+       and not C.answer_marks_in(M.fill(dn, 0, True, None)), repr(dn['ans']))
 
 
 def unit_figure(root, db):
@@ -480,6 +735,91 @@ def negative_figtable(tmp):
     rejects('端到端·表格 cell 被拍平成字符串', p, tmp)
 
 
+# ══════════════ 二·六、白名单口径 + 两槽 端到端出件 ══════════════
+def _leak_pack():
+    """一卷三节：阅读理解（题面固有 解：/答：，fill）+ 解方程（equation）+ 多行解答（word_multi）。
+    kind 非「打卡天」⇒ 不断言页数。"""
+    blk = lambda *ms: {'v': 2, 'rows': [{'cells': [{'type': 'text', 'role': '题面',   # noqa: E731
+                                                    'md': m}]} for m in ms]}
+    return {
+        'contract': 'render-pack/v1',
+        'artifact': {'id': 'A-LEAK-001', 'name': '白名单口径样张', 'kind': '样张'},
+        'papers': [{
+            'id': 'p-leak', 'kind': '样张', 'title': '泄答案闸白名单·两槽样张', 'ord': 1,
+            'layout': {'layout': 'dense_sections', 'body_pt': 12.5, 'watermark': None,
+                       'sections': [
+                           {'name': '阅读理解', 'slot': 'fill', 'grid': 'block', 'gap': 0},
+                           {'name': '解方程', 'slot': 'equation', 'grid': 'block', 'gap': 0},
+                           {'name': '多行解答', 'slot': 'word_multi', 'grid': 'block',
+                            'gap': 0, 'gap_each': 8}]},
+            'items': [
+                {'ord': 1, 'section': '阅读理解', 'score': None, 'question': {
+                    'id': 'qr1',
+                    'blocks': blk(STEM_JIE, '（1）若 $x^{2}+x+2=5$，求 $3x^{2}+3x+4$ 的值．'),
+                    'answer_blocks': blk('$13$')}},
+                {'ord': 2, 'section': '阅读理解', 'score': None, 'question': {
+                    'id': 'qr2', 'blocks': blk(STEM_DA), 'answer_blocks': blk('$\\frac{7}{2}$')}},
+                {'ord': 3, 'section': '解方程', 'score': None, 'question': {
+                    'id': 'qe1', 'blocks': blk('$2x+1=5$'),
+                    'analysis_blocks': blk('$2x=5-1$', '$2x=4$', '$x=2$'),
+                    'answer_blocks': blk('$x=2$')}},
+                {'ord': 4, 'section': '多行解答', 'score': None, 'question': {
+                    'id': 'qw1',
+                    'blocks': blk('小明骑车从家出发，先向东 $1km$ 到 $A$ 村，再向东 $4km$ 到 $B$ 村．',
+                                  '（1）以家为原点、向东为正，$A$、$B$ 各表示什么数？\n'
+                                  '（2）$B$ 村离家多远？'),
+                    'analysis_blocks': blk('（1）$A=0+1=+1$，$B=1+4=+5$',
+                                           '（2）$|5-0|=5$（$km$）'),
+                    'answer_blocks': blk('（1）$A=+1$，$B=+5$；（2）$5$ 千米')}},
+            ]}]}
+
+
+def positive_leak(tmp):
+    print('\n── 正例：白名单口径 + equation/word_multi 端到端出双 PDF ──')
+    p = Path(tmp) / 'leak.json'
+    p.write_text(json.dumps(_leak_pack(), ensure_ascii=False), encoding='utf-8')
+    out = Path(tmp) / '白名单卷'
+    rc = RP.main([str(p), '--out-dir', str(out), '--stem', '白名单样张', '--no-log'] + sb_args())
+    ok('🔴 白名单卷出件成功（题面固有 解：/答： 不再被误拦）', rc == 0, '退出码 %d' % rc)
+    qh = (out / '_源' / '_白名单样张.html').read_text(encoding='utf-8')
+    ah = (out / '_源' / '_白名单样张（答案）.html').read_text(encoding='utf-8')
+    ok('🔴 题目卷原样保留题面里的「解：」「答：」（放行不是靠删字）',
+       '解：根据题意' in qh and '答：______' in qh)
+    ok('题目卷零答案容器类零着色宏（闸真跑过且真绿）',
+       not RP.core.answer_class_hits(qh) and '\\color{' not in qh
+       and '\\mathbf{' not in qh)
+    ok('equation 槽出件：答案卷「解：」逐步 + 末步着色',
+       'class="ln ind">解：' in ah and '\\color{' in ah)
+    ok('word_multi 槽出件：答案卷逐行 .ln ind（不压成一条＝链）',
+       ah.count('class="ln ind"') >= 5, str(ah.count('class="ln ind"')))
+    q_pdf, a_pdf = out / '白名单样张.pdf', out / '白名单样张（答案）.pdf'
+    ok('白名单卷双 PDF 落盘',
+       q_pdf.exists() and q_pdf.stat().st_size > 5000 and a_pdf.exists())
+
+
+def negative_leak(tmp):
+    print('\n── 反例：真泄漏必拦（端到端） ──')
+    p = _leak_pack()
+    p['papers'][0]['items'][0]['question']['blocks']['rows'][1]['cells'][0]['md'] = \
+        '（1）答案是 $\\color{#c0272d}{13}$．'
+    rejects('端到端·答案着色宏混进题面（渲染层注入物）', p, tmp)
+
+    p = _leak_pack()
+    p['papers'][0]['items'][1]['question']['blocks']['rows'][0]['cells'][0]['md'] = \
+        '本题答案 <span class="ansv">$\\frac{7}{2}$</span>'
+    rejects('端到端·答案元素串 class=ansv 混进题面', p, tmp)   # 🔴 名字里别带引号：会当文件名用
+
+    p = _leak_pack()
+    p['papers'][0]['items'][2]['question']['blocks']['rows'][0]['cells'][0]['md'] = \
+        '解方程：$2x+1=5$'
+    rejects('端到端·equation 槽题面带指令词（劈不出左右两边）', p, tmp)
+
+    p = _leak_pack()
+    p['papers'][0]['items'][3]['question'].pop('analysis_blocks')
+    p['papers'][0]['items'][3]['question'].pop('answer_blocks')
+    rejects('端到端·word_multi 无解析无答案（答案卷整题空白）', p, tmp)
+
+
 def positive(tmp):
     print('\n── 正例：样例 pack 出双 PDF ──')
     out = Path(tmp) / '全册'
@@ -670,13 +1010,17 @@ def main():
         root, db = make_sandbox(tmp)
         unit()
         unit_choice()
+        unit_equation_wordmulti(root, db)
+        unit_leak_guard()
         unit_figure(root, db)
         unit_table(root, db)
         unit_exam_paper()
         negative(tmp)
         negative_figtable(tmp)
+        negative_leak(tmp)
         positive(tmp)
         positive_figtable(tmp, root, db)
+        positive_leak(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('\n═══ 结论：通过 %d 条，失败 %d 条 ═══' % (len(PASS), len(FAIL)))

@@ -19,8 +19,12 @@ punchkit.renderers —— 题型渲染器（**学科相关**的那一层）
 | `head(ctx)` | 可选：要往 `<head>` 塞的东西（如数学的 MathJax，科学若无需公式可返回空） |
 | `answer_mark(tex_or_html)` | 把「这是答案」这件事标出来（数学=`\\color`/`\\mathbf` 进公式；科学可用 `<b class="a">`） |
 
-🔴 **`answer_mark` 产出的标记必须进 `core.ANSWER_ONLY_MARKS`**，
-否则「题目卷不泄答案」那道闸对该学科失效。加新学科时**务必回头补这一条**。
+🔴 **`answer_mark` 产出的标记必须进 `core.ANSWER_ONLY_TEX`（宏）或
+`core.ANSWER_ONLY_CLASSES`（class 令牌）**，否则「题目卷不泄答案」那道闸对该学科失效。
+加新学科时**务必回头补这一条**，并用 `core.answer_marks_in(该槽答案卷输出)` 自证非空。
+
+🔴 标记只认**渲染层注入物**（着色宏 / 容器类），不认裸词：题面 md 原文里的
+「解：」「答：」是阅读理解类题的正当内容，2026-08-20 已从名单摘除（口径见 core.py §⑥）。
 
 ## 为什么数学的答案标记要进公式里
 

@@ -125,15 +125,71 @@ def to_png(pdf_path, out_dir, prefix, dpi=118, limit=None):
 #    子串必误报——`\frac{3}{5}` 既是口算①的答案又是脱式④题面的一部分；
 #    一道题的某个中间步骤会恰好是另一道题题面的前缀。
 #    靠得住的是「答案卷专有标记」：最终答案只经着色/加粗宏出，过程行只经 .ln/.st 出。
-ANSWER_ONLY_MARKS = ('\\color{', '\\mathbf{', '答：', '解：',
-                     'class="ln"', 'class="st"', 'class="app-sol"',
-                     'class="ansv"')          # 学前（preschool）：填空处的红色答案
+#
+# 🔴 **白名单口径**（2026-08-20 PRD-008 §一②-3 改）：名单里只留**渲染器注入物**——
+#    答案着色/加粗宏（写进 LaTeX）与答案容器类（写进 HTML class）。
+#    原名单里的裸词「解：」「答：」**已摘掉**：那是题面 md 原文的正当内容——
+#    阅读理解类讲义题的题面本来就写「他采用了如下方法：解：…」，作答提示位印
+#    「这种做法正确吗？答：______」。2026-08-20 窗G 实伤 2 例（U1·2 与 MIX·3 各一道
+#    讲义题被这两个裸词拦下，整题换掉才出得了卷）；快照实测 587 道有答案题的
+#    answer/analysis 里「解：/答：」出现 0 次，题面里出现 6 次——这两个词在本产线
+#    **只会**误伤题面，从来没拦下过一次真泄漏。
+#    摘得掉的依据不是"没见过泄漏"，是**结构**：渲染器注入的「解：/答：」一律裹在
+#    答案容器里（math.equation 的「解：」在 `.ln ind`、math.word / word_multi 的答语行
+#    含 `答：见解析。` 兜底也在 `.ln ind`），容器类还在名单上 ⇒ 真泄漏照拦不误。
+#    这条由 render_paper_test「每个槽的答案卷输出必带专有标记」逐槽钉死，
+#    新增槽位漏挂标记会当场变红。
+#
+# 🔴 容器类按 **class 令牌**判（同日改严，不是放宽）：原来比对整串 `class="ln"`，
+#    `class="ln ind"` 这种多类写法**匹配不上**——math.equation/word/word_multi 的
+#    「解：」「答语」行正是多类写法，单独漏进题目卷时旧闸抓不住。现在拆 class 属性
+#    逐令牌比，多类写法一样拦。
+ANSWER_ONLY_TEX = ('\\color{', '\\mathbf{')      # 答案着色 / 加粗（只在答案上用）
+ANSWER_ONLY_CLASSES = ('ln', 'st', 'app-sol',
+                       'ansv',                   # 学前（preschool）：填空处的红色答案
+                       'a')                      # 科学（science）：<b class="a"> 答案标记
+# 兼容名（文档与各渲染器都引它）：展开成"人看得懂的标记串"清单，判定以上面两张表为准
+ANSWER_ONLY_MARKS = ANSWER_ONLY_TEX + tuple('class="%s"' % c for c in ANSWER_ONLY_CLASSES)
+
+# 🔴 曾在名单里、按白名单口径摘掉的裸词：**只留档说明，不参与判定**。
+#    题面 md 原文里出现它们=正当内容，一律放行。
+STEM_LEGIT_WORDS = ('解：', '答：')
+
+_CLASS_ATTR = re.compile(r'class="([^"]*)"')
+
+
+def answer_class_hits(html, classes=None):
+    """这段 HTML 用到了哪些**答案卷专有容器类**（按 class 令牌比，`class="ln ind"` 也算）。"""
+    want = set(ANSWER_ONLY_CLASSES if classes is None else classes)
+    hit = []
+    for m in _CLASS_ATTR.finditer(html):
+        for c in m.group(1).split():
+            if c in want and c not in hit:
+                hit.append(c)
+    return hit
+
+
+def answer_marks_in(html):
+    """这段 HTML 带了哪些答案卷专有标记（宏 + 容器类）。
+
+    🔴 空列表 = **泄答案闸盯不住它**。新加槽位/新加学科时用它自证：
+       该槽的答案卷输出必须至少带一个标记，否则闸对该槽整个失效
+       （render_paper_test「答案卷输出必带专有标记」逐槽钉死这一条）。"""
+    return ([w for w in ANSWER_ONLY_TEX if w in html]
+            + ['class=%s' % c for c in answer_class_hits(html)])
 
 
 def leak_guard(html, extra_marks=()):
-    """题目卷里出现任何一个答案卷专有标记 = 泄答案，直接 assert 挂掉。"""
-    for w in tuple(ANSWER_ONLY_MARKS) + tuple(extra_marks):
+    """题目卷里出现任何一个**渲染器注入的**答案元素 = 泄答案，直接 assert 挂掉。
+
+    🔴 不拦题面 md 原文里固有的「解：」「答：」（白名单口径见上）。
+       `extra_marks`（骨架的 EXTRA_LEAK_MARKS）按裸串比对，骨架自己负责别挑正当词。
+    """
+    for w in tuple(ANSWER_ONLY_TEX) + tuple(extra_marks):
         assert w not in html, '🔴 题目卷出现答案卷专有标记「%s」' % w
+    hit = answer_class_hits(html)
+    assert not hit, ('🔴 题目卷出现答案卷专有容器类「%s」——渲染器把答案卷元素注入了题目卷'
+                     % '/'.join('class="%s"' % c for c in hit))
 
 
 # ═══════════════ 总编排：一次出双卷 ═══════════════

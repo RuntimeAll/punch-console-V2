@@ -137,7 +137,7 @@ def check_contract(pack_path, db):
             for r in (qq.get('blocks') or {}).get('rows') or []:
                 for c in (r or {}).get('cells') or []:
                     md = str((c or {}).get('md') or '')
-                    for w in ('计算：', '计算:', '求解：', '化简：'):
+                    for w in ('计算：', '计算:', '求解：', '化简：', '解方程：', '解方程:'):
                         need(w not in md, f'{tag} 题面带指令词 {w!r}')
     conn.close()
     return errs

@@ -3,7 +3,7 @@ import { Alert, Card, Descriptions, Drawer, Empty, Segmented, Space, Spin, Tag, 
 import { useSearchParams } from 'react-router-dom'
 import PageFrame from '@/components/PageFrame'
 import { kbApi } from '@/kb/api'
-import type { KbTemplate, KbTemplates } from '@/kb/types'
+import type { KbTemplate, KbTemplateLayer, KbTemplates } from '@/kb/types'
 
 /**
  * 模版库 · 真库 /kb/templates（PRD-007 线2 去 mock 第 4 页；本页 PRD-007 卡面漏列，调度中心裁量补入）
@@ -16,10 +16,26 @@ import type { KbTemplate, KbTemplates } from '@/kb/types'
  *   真库里现在是 {total} 张真模版，**样张一张都没登记**（template.sample_asset 全空）——
  *   页面必须如实说「样张待登记」，不许拿内嵌组件冒充样张（预览好看、打出来两样，正是这页要防的）。
  * 🔴 停用的模版不删：已经发出去的册子还是老版式，删了对不上账。
+ *
+ * ── 二轮改造：分层 + 引用链 ──────────────────────────────────────────────
+ * 模版不是一堆平级的卡，是**三层叠起来**的：组件（一个槽怎么排）› 版式（一整页什么骨架）
+ * › 配方（出哪套卷：选题规则 + 用哪张版式）。平铺成一列看不出「谁用谁」。
+ * 🔴 层来自 `params.层`；没回填才按 id 约定倒推，并在卡上标「层待回填」——**推的就说是推的**。
+ * 🔴 引用链**只画 params 里读得到的**：配方卡标「使用版式 X」（来自 params.layout），
+ *   版式卡标「含组件 Y」（params 文本里点了名）。读不到就显示「引用未登记」，
+ *   **绝不按常识写死一条关系**——出货时照着假引用核参数会真出错卷。
  */
 
 const STATUS_COLOR: Record<string, string> = { 在用: 'green', 停用: 'default' }
 type StatusFilter = '全部' | '在用' | '停用'
+
+/** 三层的顺序与说明（自下而上：组件 → 版式 → 配方） */
+const LAYERS: { key: KbTemplateLayer; desc: string }[] = [
+  { key: '组件', desc: '一个槽位怎么排——选项列位、公式块这类。被版式引用，自己不单独出卷。' },
+  { key: '版式', desc: '一整页什么骨架——纸张、边距、字号、节样式、题号规则。渲染骨架落在 punchkit layouts。' },
+  { key: '配方', desc: '出哪套卷——选题规则（题量/难度配比/题源）+ 用哪张版式。出卷流水线照它取题。' },
+]
+const LAYER_COLOR: Record<string, string> = { 组件: 'cyan', 版式: 'blue', 配方: 'purple' }
 
 /** params_json 展开成 Descriptions 行；嵌套对象/数组转成人读得懂的一行，不吐生 JSON 给人看 */
 function paramItems(params: Record<string, unknown> | null) {
@@ -62,11 +78,36 @@ function ParamValue({ v }: { v: unknown }) {
   return <Typography.Text style={{ fontSize: 13 }}>{String(v)}</Typography.Text>
 }
 
-/** 一张模版卡：名字 / 版本 / 状态 / 用途 / 适用册型 / 参数摘要四项 / 样张登记与否 */
+/** 引用链一行：「使用版式 X」/「含组件 Y」——文案随 ref.kind 变，来源随行标注 */
+function RefLine({ t }: { t: KbTemplate }) {
+  if (!t.refs.length) {
+    return (
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        引用未登记（params 里没写它用哪张版式 / 含哪些组件）
+      </Typography.Text>
+    )
+  }
+  return (
+    <Space size={4} wrap>
+      {t.refs.map((r) => (
+        <Tag
+          key={`${r.kind}|${r.id}`}
+          color={LAYER_COLOR[r.kind] ?? 'default'}
+          style={{ marginInlineEnd: 0 }}
+          title={`引用来源：${r.via}`}
+        >
+          {r.kind === '版式' ? '使用版式' : r.kind === '组件' ? '含组件' : '引用'} {r.name}
+        </Tag>
+      ))}
+    </Space>
+  )
+}
+
+/** 一张模版卡：名字 / 版本 / 状态 / 层 / 用途 / 适用册型 / 参数摘要 / 引用链 / 样张登记与否 */
 function TemplateCard({ t, onOpen }: { t: KbTemplate; onOpen: () => void }) {
   const p = (t.params ?? {}) as Record<string, unknown>
   const brief: [string, string][] = [
-    ['版式', String(p.layout ?? p.slot ?? '—')],
+    ['版式 key', String(p.layout ?? p.slot ?? '—')],
     ['纸张', String(p.纸张 ?? p['纸张'] ?? '—')],
     ['满分/题量', p.满分 != null || p.题量 != null ? `${p.满分 ?? '—'} 分 / ${p.题量 ?? '—'} 题` : '—'],
     ['结构', String(p.结构 ?? p.布局 ?? '—')],
@@ -81,6 +122,12 @@ function TemplateCard({ t, onOpen }: { t: KbTemplate; onOpen: () => void }) {
         <Space size={6} wrap>
           <span>{t.name ?? t.id}</span>
           <Tag style={{ marginInlineEnd: 0 }}>{t.version ?? '未标版本'}</Tag>
+          {/* 🔴 推来的层必须自报是推的，别让人以为库里登记了 */}
+          {t.层_待回填 ? (
+            <Tag color="orange" style={{ marginInlineEnd: 0 }} title={`层来自：${t.层_from ?? '推不出来'}`}>
+              层待回填
+            </Tag>
+          ) : null}
         </Space>
       }
       extra={
@@ -114,6 +161,13 @@ function TemplateCard({ t, onOpen }: { t: KbTemplate; onOpen: () => void }) {
               <span style={{ wordBreak: 'break-all' }}>{v}</span>
             </div>
           ))}
+      </div>
+
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #f0f0f0' }}>
+        <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineEnd: 6 }}>
+          引用
+        </Typography.Text>
+        <RefLine t={t} />
       </div>
 
       <div
@@ -177,7 +231,9 @@ export function KbTemplatesPage() {
           />
           {d ? (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              共 {d.total} 张 · 在用 {d.in_use} · 已登记样张 {d.with_sample}
+              共 {d.total} 张 · 在用 {d.in_use} · 已登记样张 {d.with_sample} · 分层 组件{' '}
+              {d.层_stat.组件} / 版式 {d.层_stat.版式} / 配方 {d.层_stat.配方}
+              {d.层_未归 > 0 ? ` · 未归层 ${d.层_未归}` : ''}
             </Typography.Text>
           ) : null}
         </Space>
@@ -210,17 +266,66 @@ export function KbTemplatesPage() {
         />
       ) : null}
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-        {!d ? (
-          err ? null : (
-            <Spin />
-          )
-        ) : shown.length ? (
-          shown.map((t) => <TemplateCard key={t.id} t={t} onOpen={() => setOpenId(t.id)} />)
-        ) : (
-          <Empty description={`没有「${filter}」的模版`} />
-        )}
-      </div>
+      {d && d.层_待回填 > 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={`${d.层_待回填} 张模版的「层」是按 id 约定推出来的，不是登记的`}
+          description="层的正本是 params.层。没回填的那几张卡上标着「层待回填」——主线回填后本页自动改用登记值，不需要改代码。"
+        />
+      ) : null}
+
+      {!d ? (
+        err ? null : (
+          <Spin />
+        )
+      ) : shown.length === 0 ? (
+        <Empty description={`没有「${filter}」的模版`} />
+      ) : (
+        <>
+          {/* 三层分区：自下而上 组件 → 版式 → 配方。同层的卡并排，跨层靠分区分开 */}
+          {LAYERS.map(({ key, desc }) => {
+            const group = shown.filter((t) => t.层 === key)
+            if (!group.length) return null
+            return (
+              <div key={key} style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                  <Tag color={LAYER_COLOR[key]} style={{ marginInlineEnd: 0 }}>
+                    {key}
+                  </Tag>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {group.length} 张 —— {desc}
+                  </Typography.Text>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                  {group.map((t) => (
+                    <TemplateCard key={t.id} t={t} onOpen={() => setOpenId(t.id)} />
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+          {/* 🔴 推不出层的不硬塞进某一层，单独一区如实摆 */}
+          {shown.some((t) => t.层 === null) ? (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                <Tag style={{ marginInlineEnd: 0 }}>未归层</Tag>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  params.层 没登记，id 也认不出来 —— 等人工归层，不猜
+                </Typography.Text>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                {shown
+                  .filter((t) => t.层 === null)
+                  .map((t) => (
+                    <TemplateCard key={t.id} t={t} onOpen={() => setOpenId(t.id)} />
+                  ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
 
       <Card size="small" style={{ marginTop: 12 }} title="新模版怎么来">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
@@ -248,6 +353,24 @@ export function KbTemplatesPage() {
             <Descriptions size="small" column={1} bordered>
               <Descriptions.Item label="模版编号">
                 <Typography.Text code>{current.id}</Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="层">
+                <Space size={6} wrap>
+                  {current.层 ? (
+                    <Tag color={LAYER_COLOR[current.层] ?? 'default'} style={{ marginInlineEnd: 0 }}>
+                      {current.层}
+                    </Tag>
+                  ) : (
+                    <Typography.Text type="secondary">未归层</Typography.Text>
+                  )}
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    来自 {current.层_from ?? '推不出来'}
+                    {current.层_待回填 ? '（待回填 params.层）' : ''}
+                  </Typography.Text>
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="引用链">
+                <RefLine t={current} />
               </Descriptions.Item>
               <Descriptions.Item label="用途">{current.purpose ?? '—'}</Descriptions.Item>
               <Descriptions.Item label="适用册型">{current.book_kinds ?? '—'}</Descriptions.Item>

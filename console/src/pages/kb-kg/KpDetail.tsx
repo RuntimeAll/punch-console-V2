@@ -189,19 +189,46 @@ export function KpDetail({ id, detail, loading }: { id: string; detail: KbKpDeta
             ),
           },
           {
-            // 🔴 对齐-003：题型实体层停用后，「这类题长什么样」就落在 kp 自己这几列上
+            // 🔴 对齐-001：考点叶自己携带教研属性（与题的属性同构，是另一个维度）。
+            //   三列逐格摆——空就明写「未定标」，不整格省掉：省掉会让人以为这叶没有这个维度。
             key: 'exam',
             label: '教研属性',
             children: (
-              <Space size={4} wrap>
-                {detail.emphasis ? <Tag color="volcano">{detail.emphasis}</Tag> : null}
-                {detail.freq ? <Tag color="geekblue">{detail.freq}</Tag> : null}
-                {detail.diff_label ? <Tag>{detail.diff_label}</Tag> : null}
-                {!detail.emphasis && !detail.freq && !detail.diff_label ? (
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    未定标（emphasis / freq / diff_code 三列都空——待人工定标，不是坏账）
+              <Space size={10} wrap style={{ fontSize: 12.5 }}>
+                <span>
+                  <Typography.Text type="secondary" style={{ marginInlineEnd: 4 }}>
+                    重难点
                   </Typography.Text>
-                ) : null}
+                  {detail.emphasis ? (
+                    <Tag color="volcano" style={{ marginInlineEnd: 0 }}>
+                      {detail.emphasis}
+                    </Tag>
+                  ) : (
+                    <Typography.Text type="secondary">未定标</Typography.Text>
+                  )}
+                </span>
+                <span>
+                  <Typography.Text type="secondary" style={{ marginInlineEnd: 4 }}>
+                    频率
+                  </Typography.Text>
+                  {detail.freq ? (
+                    <Tag color="geekblue" style={{ marginInlineEnd: 0 }}>
+                      {detail.freq}
+                    </Tag>
+                  ) : (
+                    <Typography.Text type="secondary">未定标</Typography.Text>
+                  )}
+                </span>
+                <span>
+                  <Typography.Text type="secondary" style={{ marginInlineEnd: 4 }}>
+                    难度
+                  </Typography.Text>
+                  {detail.diff_label ? (
+                    <Tag style={{ marginInlineEnd: 0 }}>{detail.diff_label}</Tag>
+                  ) : (
+                    <Typography.Text type="secondary">未定标</Typography.Text>
+                  )}
+                </span>
               </Space>
             ),
           },
@@ -209,10 +236,17 @@ export function KpDetail({ id, detail, loading }: { id: string; detail: KbKpDeta
             key: 'desc',
             label: '考法描述',
             children: detail.desc ? (
-              <Typography.Text style={{ fontSize: 13 }}>{detail.desc}</Typography.Text>
+              <div>
+                <Typography.Text style={{ fontSize: 13 }}>{detail.desc}</Typography.Text>
+                <Typography.Paragraph type="secondary" style={{ fontSize: 12, margin: '4px 0 0' }}>
+                  🔴 这一格就是<b>讲义「题型N」的去处</b>：对齐-003 撤掉题型簇实体层后，
+                  考法面并进本列（题型实体表 question_pattern 已清零）。全账见下方「题型下落」。
+                </Typography.Paragraph>
+              </div>
             ) : (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                这片叶还没写考法描述（对齐-003 起「这类题长什么样」就归这一列）
+                这片叶还没写考法描述（对齐-003 起「这类题长什么样」就归这一列；
+                若它对应的讲义题型在「待归位」那 70 个里，归位后才会落到这儿）
               </Typography.Text>
             ),
           },

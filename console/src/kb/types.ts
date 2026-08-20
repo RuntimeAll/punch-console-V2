@@ -251,6 +251,18 @@ export interface KbCriteria {
 }
 
 // ── /api/kb/templates ───────────────────────────────────────────────────
+/** 模版三层：组件（一个槽怎么排）› 版式（一整页什么骨架）› 配方（出哪套卷：选题 + 版式） */
+export type KbTemplateLayer = '组件' | '版式' | '配方'
+
+/** 一条引用：**从 params 里读出来的**，读不到就没有这一条（页面显示「引用未登记」） */
+export interface KbTemplateRef {
+  kind: KbTemplateLayer | '引用'
+  id: string
+  name: string
+  /** 这条引用是从哪个字段读出来的，随行带出——不许页面自己编关系 */
+  via: string
+}
+
 export interface KbTemplate {
   id: string
   name: string | null
@@ -266,6 +278,11 @@ export interface KbTemplate {
   registered_by: string | null
   updated_at: string | null
   artifact_count: number
+  层: KbTemplateLayer | null
+  /** 'params.层'=登记的 ｜ 'id 约定回退'=推的 ｜ null=推不出来 */
+  层_from: string | null
+  层_待回填: boolean
+  refs: KbTemplateRef[]
 }
 
 export interface KbTemplates {
@@ -274,6 +291,9 @@ export interface KbTemplates {
   with_sample: number
   shown: number
   filters: { status: string | null }
+  层_stat: Record<KbTemplateLayer, number>
+  层_未归: number
+  层_待回填: number
   rows: KbTemplate[]
 }
 
@@ -413,11 +433,16 @@ export interface KbQuestionDetail {
 }
 
 // ── /api/kb/artifacts ───────────────────────────────────────────────────
+/** 册细类（2026-08-20 窗I 落库）：组卷册=v2 产线成品 ｜ 发布包=打包销售件 ｜ 历史册=吃进来的老货 */
+export type KbArtifactSubkind = '组卷册' | '发布包' | '历史册'
+
 export interface KbArtifactRow {
   id: string
   name: string
   kind: string
   status: string
+  /** 🔴 列没上线时为 null（顶层 细类_available=false），页面必须降级成「全量显示」而不是空三页签 */
+  细类: KbArtifactSubkind | null
   source_line: string | null
   template_id: string | null
   kp_ids: string[]
@@ -427,9 +452,25 @@ export interface KbArtifactRow {
   created_at: string | null
   paper_count: number
   item_count: number
+  /** 人话名：组卷册取所属卷的卷面标题、发布包取 note.标题候选[0]，取不到就退回 name */
+  display_name: string
+  /** 这一格从哪来（'paper.title…' / 'note.标题候选[0]' / 'artifact.name'）——推法随行，不许页面自己编 */
+  display_from: string
+  /** 内部代号（浙教出卷·U1·2 这类）；人话名就是 name 时为 null，不重复摆两行 */
+  code_name: string | null
+  retired: boolean
+}
+
+export interface KbArtifactList {
+  total: number
+  细类_available: boolean
+  细类_stat: Record<KbArtifactSubkind, number> | null
+  retired_total: number
+  rows: KbArtifactRow[]
 }
 
 export interface KbArtifactDetail extends Omit<KbArtifactRow, 'paper_count' | 'item_count'> {
+  细类_available: boolean
   files: Record<string, string> | null
   papers: {
     id: string
@@ -450,8 +491,56 @@ export interface KbArtifactDetail extends Omit<KbArtifactRow, 'paper_count' | 'i
   }[]
 }
 
+// ── /api/kb/papers（卷库列表）─────────────────────────────────────────────
+/** 卷头参数：落点是 paper.layout_json，不是 paper_item.score（实查逐题分值全库为 NULL） */
+export interface KbPaperHead {
+  layout_key: string | null
+  full_score: number | null
+  duration_min: number | null
+  subtitle: string | null
+  section_count: number | null
+}
+
+export interface KbPaperRow extends KbPaperHead {
+  id: string
+  title: string
+  kind: string
+  ord: number | null
+  status: string
+  created_at: string | null
+  item_count: number
+  /** 逐题分值合计：全库现为 null（没落库），页面显示「未逐题记分」不显示 0 */
+  score_sum: number | null
+  /** 卷里指向已不在库的题的行数（断链），如实标 */
+  missing_count: number
+  artifact_id: string | null
+  artifact_name: string | null
+  artifact_status: string | null
+  artifact_细类: KbArtifactSubkind | null
+  /** artifact_id 指了一本不存在的册 —— 与「本来就没挂册」是两件事 */
+  artifact_missing: boolean
+}
+
+export interface KbPapers {
+  total: number
+  filters: { kind: string | null; status: string | null; artifact_id: string | null }
+  kind_stat: { kind: string; count: number }[]
+  status_stat: { status: string; count: number }[]
+  item_total: number
+  with_full_score: number
+  with_duration: number
+  rows: KbPaperRow[]
+}
+
 // ── /api/kb/papers/:id ──────────────────────────────────────────────────
-export interface KbPaperDetail {
+export interface KbPaperItemKp {
+  id: string | null
+  name: string | null
+  is_primary: boolean
+  missing: boolean
+}
+
+export interface KbPaperDetail extends KbPaperHead {
   id: string
   title: string
   kind: string
@@ -459,7 +548,8 @@ export interface KbPaperDetail {
   status: string
   created_at: string | null
   layout: Record<string, unknown> | null
-  artifact: { id: string; name: string; kind: string; status: string } | null
+  artifact: { id: string; name: string; kind: string; status: string; 细类: KbArtifactSubkind | null } | null
+  item_count: number
   items: {
     ord: number
     section: string | null
@@ -470,8 +560,49 @@ export interface KbPaperDetail {
     missing: boolean
     qtype_label: string | null
     diff_label: string | null
+    /** 题面首块截 120 字（列表态用）；全文仍在 blocks 里，两者并存 */
+    stem: string
+    kps: KbPaperItemKp[]
     blocks: KbDoc | null
     answer: KbDoc | null
     analysis: KbDoc | null
+  }[]
+}
+
+// ── /api/kb/kg/patterns（讲义题型的下落，对齐-003）────────────────────────
+export interface KbPatternPending {
+  key: string
+  讲: number | null
+  题型名: string
+  done?: boolean
+}
+
+export interface KbKgPatterns {
+  available: boolean
+  /** available=false 时说清为什么（哪个正本文件不在 / JSON 坏了），不编计数 */
+  reason?: string
+  对齐?: string
+  source: { map: string; list: string; list_available?: boolean }
+  total?: number
+  anchored_total?: number
+  pending_total?: number
+  checklist_total?: number
+  checklist_done?: number
+  /** 两个正本文件对不对得上：null=清单文件不在，false=有差集（页面标红） */
+  一致?: boolean | null
+  只在json?: string[]
+  只在清单?: string[]
+  leaf_total: number
+  leaf_with_desc: number
+  /** 对齐-003 后 question_pattern 应恒为 0 行 */
+  pattern_rows: number
+  leaf_covered?: number
+  pending_by_lecture?: { 讲: number; count: number }[]
+  pending_rows?: KbPatternPending[]
+  anchored_by_leaf?: {
+    kp_id: string
+    kp_name: string | null
+    kp_missing: boolean
+    题型: { key: string; 题型名: string }[]
   }[]
 }

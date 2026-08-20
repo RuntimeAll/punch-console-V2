@@ -19,6 +19,7 @@ import Criteria from '@/pages/criteria'
 // 🔴 真库组：直连 kb.db 的只读页（与上面所有 mock 页并列不合并，改一边不影响另一边）
 import KbQuestions from '@/pages/kb-questions'
 import KbArtifacts from '@/pages/kb-artifacts'
+import KbPapersPage from '@/pages/kb-papers'
 import KbKg from '@/pages/kb-kg'
 import KbModelsPage from '@/pages/kb-models'
 import KbCriteriaPage from '@/pages/kb-criteria'
@@ -64,6 +65,8 @@ export function App() {
           {/* 🔴 真库：走 /api/kb 薄读 API（node console/server/kb-read-api.mjs，:4310），只读无写口 */}
           <Route path="/kb/questions" element={<KbQuestions />} />
           <Route path="/kb/artifacts" element={<KbArtifacts />} />
+          {/* PRD-007 二轮：卷库（paper 级）——册视角之外补一个卷视角，?paper= 直链到逐题预览 */}
+          <Route path="/kb/papers" element={<KbPapersPage />} />
           {/* PRD-007 线2 去 mock：维护三页 + 模版库接真库，与同名 mock 页**并存**，
               mock 页在用户走查退役前一字不动（导航里靠「·真库」标注区分） */}
           <Route path="/kb/kg" element={<KbKg />} />

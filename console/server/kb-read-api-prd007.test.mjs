@@ -394,7 +394,7 @@ test('questions：ticket=1 只出还挂着待处理工单的题（闸④ 上脸�
 test('🔴 新开 6 个口一个写口都没加：写端点恒 =1，且只能是 sale-state', async () => {
   const nf = await get('/api/kb/不存在的口')
   assert.equal(nf.status, 404)
-  assert.equal(nf.body.端点合计, '15 读 + 1 写 = 16')
+  assert.equal(nf.body.端点合计, '17 读 + 1 写 = 18')
   const writes = nf.body.endpoints.filter((e) => e.includes('POST '))
   assert.equal(writes.length, 1)
   assert.match(writes[0], /\/api\/kb\/sale-state/)

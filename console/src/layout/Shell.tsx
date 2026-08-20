@@ -90,6 +90,8 @@ const NAV: NavItem[] = [
     children: [
       { key: '/kb/questions', label: '题库·真库' },
       { key: '/kb/artifacts', label: '资料册·真库' },
+      // PRD-007 二轮：卷库=paper 级视角（资料册是册级）。两页看的是同一批数据的两个粒度，不合并
+      { key: '/kb/papers', label: '卷库·真库' },
       // PRD-007 线2：维护三页 + 模版库的真库版。与 /kg /model /criteria /export-preview 四个
       // mock 页**并存**——mock 页在用户走查退役前一字不动，靠这里的「·真库」标注认路。
       { key: '/kb/kg', label: '知识图谱·真库' },
@@ -114,6 +116,7 @@ function activeKey(pathname: string): string {
   // 🔴 真库两页排最前：/kb/* 与 /questions、/artifacts（mock 页）是**两套页**，绝不能互相点亮
   if (pathname.startsWith('/kb/questions')) return '/kb/questions'
   if (pathname.startsWith('/kb/artifacts')) return '/kb/artifacts'
+  if (pathname.startsWith('/kb/papers')) return '/kb/papers'
   if (pathname.startsWith('/kb/kg')) return '/kb/kg'
   if (pathname.startsWith('/kb/models')) return '/kb/models'
   if (pathname.startsWith('/kb/criteria')) return '/kb/criteria'

@@ -21,11 +21,13 @@
  *
  * 端点账（🔴 改口子必须同步改这三处：ROUTES/WRITE_ROUTES、下面的 EP_READ/EP_WRITE 常量、
  *   404 的 endpoints 清单——数量对不上服务直接起不来，见文件末尾自检闸）：
- *   **16 条 = 15 读 + 1 写**。账的来历：原 7 读；PRD-003 **+2 读**
+ *   **18 条 = 17 读 + 1 写**。账的来历：原 7 读；PRD-003 **+2 读**
  *   （GET /api/kb/materials、GET /api/kb/artifact-members）**+1 写**（POST /api/kb/sale-state）；
  *   PRD-007 展示台去 mock **+6 读**（kg/aliases、kp/:id、models、criteria、templates、semantic/health），
- *   并给 /api/kb/questions 加来源三维筛选、审核工单标记与 --like 语意搜索。
- *   🔴 **写端点数仍是 1**：PRD-007 一个写口都不加（页面只读、写归 agent 的原则不破）。
+ *   并给 /api/kb/questions 加来源三维筛选、审核工单标记与 --like 语意搜索；
+ *   PRD-007 **二轮页面线 +2 读**（GET /api/kb/papers 卷库列表、GET /api/kb/kg/patterns 题型下落），
+ *   并给 /api/kb/artifacts 加「细类 + 人话名」、/api/kb/templates 加「层 + 引用链」。
+ *   🔴 **写端点数仍是 1**：PRD-007 两轮一个写口都不加（页面只读、写归 agent 的原则不破）。
  *
  * 🔴 端点可以是**异步**的（返回 Promise）：语意搜索要等 :4315 的 serve 回话。
  *   异步那条路的只读句柄由 then 链关（见文件末尾 dispatcher），不许走 finally 提前关。
@@ -40,7 +42,7 @@
  */
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -76,6 +78,28 @@ const all = (db, sql, ...p) => db.prepare(sql).all(...p)
 const one = (db, sql, ...p) => db.prepare(sql).get(...p)
 /** IN (?,?,?) 占位串 */
 const marks = (n) => Array.from({ length: n }, () => '?').join(',')
+
+/**
+ * 🔴 列存在探针（优雅回退用，不是「猜」）。
+ *
+ * 为什么需要：主位 kb.db 的 DDL 由主线单独排窗口执行，而 worktree 里的沙盘库、
+ * 测试临时库、别人机器上的旧库**未必已经跑过那道 ALTER**。缺列时裸 SELECT 会
+ * 直接 500（no such column），整页白屏——比"少一列信息"坏得多。
+ *
+ * 口径：**缺列不假装有值**。回退路径一律把 `xx_available:false` 随响应端出去，
+ * 页面照着显示「该列待上线」的提示，绝不拿别的列推一个假的顶上
+ * （推一个假的 = 页面在编事实，正是本文件到处在防的那件事）。
+ */
+function hasCol(db, table, col) {
+  try {
+    return db
+      .prepare(`PRAGMA table_info("${String(table).replace(/"/g, '""')}")`)
+      .all()
+      .some((c) => c.name === col)
+  } catch {
+    return false
+  }
+}
 
 /**
  * 🔴 LIKE 模式转义：把用户输入里的 `%` `_` `\` 变成字面量。
@@ -125,13 +149,31 @@ function plainText(doc) {
   return out.join(' ').replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * 🔴 按字数截断会**切进 `$…$` 中间**，留下一个落单的 `$`——前端 MathJax 认不出这段公式，
+ * 于是把 `$174\leqslant x\leqs…` 这样的**生 LaTeX 源码**原样印在列表里（实测截图抓到）。
+ * 修法：截完数一下没被转义的 `$`，是奇数就退到最后那个 `$` 之前——
+ * **宁可少显示半句，也不摆一段渲不出来的乱码**。
+ */
+function trimDanglingMath(s) {
+  let count = 0
+  let lastOpen = -1
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== '$') continue
+    if (i > 0 && s[i - 1] === '\\') continue // 转义的 \$ 是人民币不是公式
+    count++
+    lastOpen = i
+  }
+  return count % 2 === 0 ? s : s.slice(0, lastOpen).trimEnd()
+}
+
 /** 题面摘要：整份块流的首个 text 块，超 n 字截断（列表页用） */
 function stemBrief(raw, n = 120) {
   const doc = parseDoc(raw)
   if (!doc) return ''
   if (doc.parse_error) return `🔴 块流损坏：${doc.parse_error}`
   const t = plainText(doc)
-  return t.length > n ? `${t.slice(0, n)}…` : t
+  return t.length > n ? `${trimDanglingMath(t.slice(0, n))}…` : t
 }
 
 /** 字典表 → { code: label }（题型/难度/来源的中文标签一律从库里取，不在代码里写死） */
@@ -818,11 +860,55 @@ function noteObj(note) {
   }
 }
 
+/**
+ * 「人话名」——册子对人显示什么名字。
+ *
+ * 🔴 背景（用户走查原话大意）：一本账里列的全是 `浙教出卷·U1·2` 这种**内部代号**，
+ *   人看不出这是哪份卷。代号是产线自己排班用的，不是卷面上印的名字。
+ *
+ * 🔴 三条口径，**只取库里真有的字段，取不到就退回 name，绝不拼凑一个好看的名字**：
+ *   ① 组卷册 → 所属 paper 的卷面标题（关联通路 = `paper.artifact_id`，按 ord,id 取首卷）。
+ *      实查：27 本组卷册**每一本**的卷名都与册名不同，所以这一步是真有用不是摆设。
+ *   ② 发布包 → `note.标题候选[0]`（宣发字段定稿位，数据结构 §2.6c）。
+ *      候选串前面带「1. 」这种列表序号，是候选清单的编号不是标题的一部分，剥掉。
+ *   ③ 其余（历史册/取不到）→ 就用 `artifact.name`，`display_from` 如实写 'artifact.name'。
+ * 每行随行回 `display_from` 说明这一格从哪来——与来源册那套「推法随行」同一个规矩。
+ */
+function humanName(db, row, 细类) {
+  const fallback = { display_name: row.name, display_from: 'artifact.name', code_name: null }
+  if (细类 === '组卷册') {
+    const p = one(db, 'SELECT title FROM paper WHERE artifact_id = ? ORDER BY ord, id LIMIT 1', row.id)
+    const t = String(p?.title ?? '').trim()
+    // 卷名与册名一样就没必要摆两行（现库 0 本这样，但别的库可能有）
+    if (t && t !== row.name) return { display_name: t, display_from: 'paper.title（所属卷的卷面标题）', code_name: row.name }
+    return fallback
+  }
+  if (细类 === '发布包') {
+    const o = noteObj(row.note)
+    const cand = Array.isArray(o?.标题候选) ? o.标题候选 : null
+    // 🔴 只认数组首项；不是数组（或空）就老实退回 name，不去 note 里翻别的键凑一个
+    const first = cand && cand.length ? String(cand[0] ?? '').trim() : ''
+    if (first) {
+      const cleaned = first.replace(/^\s*\d+\s*[.、．]\s*/, '').trim() // 剥候选清单的序号前缀
+      if (cleaned && cleaned !== row.name) {
+        return { display_name: cleaned, display_from: 'note.标题候选[0]', code_name: row.name }
+      }
+    }
+    return fallback
+  }
+  return fallback
+}
+
 function epArtifacts(db) {
+  // 🔴 细类（组卷册/发布包/历史册）由主线单独排 DDL 窗口落地。缺列时**不猜**：
+  //   整列回 null + 顶层 细类_available:false，页面据此改成「全量一张表 + 细类列待上线」提示。
+  const has细类 = hasCol(db, 'artifact', '细类')
+  const sel细类 = has细类 ? 'a.细类' : 'NULL'
   const rows = all(
     db,
     `SELECT a.id, a.name, a.kind, a.status, a.sale_state, a.source_line, a.template_id,
             a.kp_ids_json, a.delivered_at, a.link, a.note, a.created_at,
+            ${sel细类} AS 细类,
             (SELECT COUNT(*) FROM paper p WHERE p.artifact_id = a.id) AS paper_count,
             (SELECT COUNT(*) FROM paper_item pi JOIN paper p2 ON p2.id = pi.paper_id
               WHERE p2.artifact_id = a.id) AS item_count,
@@ -831,14 +917,26 @@ function epArtifacts(db) {
      FROM artifact a
      ORDER BY a.created_at DESC, a.id`,
   )
+  const out = rows.map((r) => ({
+    ...r,
+    kp_ids: r.kp_ids_json ? parseJson(r.kp_ids_json) : [],
+    pan_code: panCode(r.note, r.link),
+    files: null,
+    ...humanName(db, r, r.细类),
+    // 🔴 退役=账面下线不物理删（status 值域 2026-08-20 窗I 扩入「退役」）。
+    //   页面把它折进「已退役」区，不与现役混排——混排会让人把退役册当在售册发出去。
+    retired: r.status === '退役',
+  }))
+  const bucket = (k) => out.filter((r) => r.细类 === k).length
   return {
-    total: rows.length,
-    rows: rows.map((r) => ({
-      ...r,
-      kp_ids: r.kp_ids_json ? parseJson(r.kp_ids_json) : [],
-      pan_code: panCode(r.note, r.link),
-      files: null,
-    })),
+    total: out.length,
+    // 缺列时页面据此降级成「全量显示 + 细类列待上线」，不假装分好了类
+    细类_available: has细类,
+    细类_stat: has细类
+      ? { 组卷册: bucket('组卷册'), 发布包: bucket('发布包'), 历史册: bucket('历史册') }
+      : null,
+    retired_total: out.filter((r) => r.retired).length,
+    rows: out,
   }
 }
 
@@ -908,6 +1006,12 @@ function epArtifactDetail(db, id) {
 
   return {
     ...a,
+    // 🔴 `...a` 是 SELECT *，细类在库里就自带出来、不在就整格缺席；这里补一个显式的
+    //   available 标记，页面不必靠 undefined 猜（列表口那边也是同一套口径）。
+    细类: a.细类 ?? null,
+    细类_available: hasCol(db, 'artifact', '细类'),
+    ...humanName(db, a, a.细类 ?? null),
+    retired: a.status === '退役',
     kp_ids: a.kp_ids_json ? parseJson(a.kp_ids_json) : [],
     files: a.files_json ? parseJson(a.files_json) : null,
     // sale_state 由 `...a` 原样带出（人工列，本 API 只读它；改它走 POST /api/kb/sale-state）
@@ -1222,6 +1326,137 @@ function epKgAliases(db, q) {
  * 单个 kp 节点详情 = **聚合落点**（叶：档案+家当；枝：下辖规模+零挂载缺口）。
  * 🔴 建叶/改树/改归属这类结构动作**不在页面**（走 KG维护 skill 的 kg_tool.py），本端点纯读。
  */
+/**
+ * 「那批考点哪里去了」——讲义 173 个题型标题的下落（用户走查第一问的答案）。
+ * ═══════════════════════════════════════════════════════════════════════
+ * 🔴 口径正本 = 记录/口径对齐记录.md 的 **对齐-003**：不设与考点平行的「题型簇」实体层，
+ *   讲义里的「题型N」标题本质是考点的**考法面**，处理方式 = 并进对应考点叶的 `kp.desc`。
+ *   `question_pattern` 表 173 行已清空（页面别拿它装东西，见 epModels 头上的注释）。
+ *
+ * 于是 173 个题型分两路走：
+ *   ① **103 个已锚** → 机器锚到唯一考点叶，已并进该叶 desc（现库 55 片叶带 desc）。
+ *   ② **70 个待归位** → 方法/场景/跨叶词，机器锚不到唯一叶，等人点名「这条归哪片叶」。
+ *      按 **对齐-002**（别名层只做正向产线词、不为历史数据铸兼容名），这批**不铸别名硬凑**。
+ *
+ * 🔴 数据来自两个**磁盘正本文件**（不是库）——所以本端点是唯一一条读文件的读口：
+ *   · 工具箱/kg/题型锚定映射.json     题型 → kp_id（null = 待归位）
+ *   · 记录/考点定标/待挂题型-浙教七上.md  人工归位清单（勾一条办一条）
+ *   两者**必须对得上**（md 的条目集 ≡ json 里 kp_id 为 null 的键集）。对不上就 `一致:false`
+ *   原样端出差集——页面标红，绝不挑一个显示（挑一个 = 把不一致演成一致）。
+ *   文件不在（worktree 沙盘 / 别人机器）⇒ `available:false` + 如实说哪个文件找不到，不编计数。
+ */
+function epKgPatterns(db) {
+  // 🔴 路径可用环境变量顶掉——不是为了"灵活"，是为了**「文件不在」这条路能被测**：
+  //   优雅回退写了不测 = 等于没写（真出事那天才发现回退分支自己也崩）。
+  const MAP_REL = process.env.KG_PATTERN_MAP || '工具箱/kg/题型锚定映射.json'
+  const LIST_REL = process.env.KG_PATTERN_LIST || '记录/考点定标/待挂题型-浙教七上.md'
+  const mapPath = resolve(V2_ROOT, MAP_REL)
+  const listPath = resolve(V2_ROOT, LIST_REL)
+
+  const leafStat = {
+    leaf_total: one(db, "SELECT COUNT(*) AS c FROM kp WHERE level = '考点' AND status = '现行'").c,
+    leaf_with_desc: one(
+      db,
+      "SELECT COUNT(*) AS c FROM kp WHERE level = '考点' AND desc IS NOT NULL AND TRIM(desc) <> ''",
+    ).c,
+    pattern_rows: one(db, 'SELECT COUNT(*) AS c FROM question_pattern').c, // 对齐-003 后应为 0
+  }
+
+  if (!existsSync(mapPath)) {
+    return {
+      available: false,
+      reason: `锚定映射文件不在：${MAP_REL}`,
+      source: { map: MAP_REL, list: LIST_REL },
+      ...leafStat,
+    }
+  }
+  let map
+  try {
+    map = JSON.parse(readFileSync(mapPath, 'utf8'))
+  } catch (e) {
+    return { available: false, reason: `${MAP_REL} 不是合法 JSON：${e.message}`, source: { map: MAP_REL, list: LIST_REL }, ...leafStat }
+  }
+  if (!map || typeof map !== 'object' || Array.isArray(map)) {
+    return { available: false, reason: `${MAP_REL} 顶层不是对象`, source: { map: MAP_REL, list: LIST_REL }, ...leafStat }
+  }
+
+  const kpName = (id) => {
+    if (!id) return null
+    const r = one(db, 'SELECT name, status FROM kp WHERE id = ?', String(id))
+    return r ? { name: r.name, status: r.status } : null
+  }
+  const lecture = (key) => {
+    const m = /^讲(\d+)/.exec(String(key))
+    return m ? Number(m[1]) : null
+  }
+
+  const anchored = []
+  const pending = []
+  for (const [key, v] of Object.entries(map)) {
+    const 题型名 = String(v?.题型名 ?? '').trim() || key
+    const kpId = v?.kp_id ? String(v.kp_id) : null
+    const row = { key, 讲: lecture(key), 题型名 }
+    if (kpId) {
+      const k = kpName(kpId)
+      // 🔴 锚到了一片库里没有的叶 = 断链坏账，标出来不吞
+      anchored.push({ ...row, kp_id: kpId, kp_name: k?.name ?? null, kp_status: k?.status ?? null, kp_missing: !k })
+    } else {
+      pending.push(row)
+    }
+  }
+  anchored.sort((a, b) => (a.讲 ?? 0) - (b.讲 ?? 0) || a.key.localeCompare(b.key))
+  pending.sort((a, b) => (a.讲 ?? 0) - (b.讲 ?? 0) || a.key.localeCompare(b.key))
+
+  // ── 人工归位清单：勾一条 = 办掉一条 ──
+  let list = { available: false, total: 0, done: 0, keys: [] }
+  if (existsSync(listPath)) {
+    const md = readFileSync(listPath, 'utf8')
+    const items = [...md.matchAll(/^- \[([ xX])\]\s*(讲\d+题型\d+)\s*[：:]\s*(.+)$/gm)].map((m) => ({
+      key: m[2],
+      题型名: m[3].trim(),
+      done: m[1].toLowerCase() === 'x',
+    }))
+    list = { available: true, total: items.length, done: items.filter((i) => i.done).length, keys: items.map((i) => i.key) }
+    for (const p of pending) p.done = items.find((i) => i.key === p.key)?.done ?? false
+  }
+
+  // ── 两个正本文件的一致闸 ──
+  const pendKeys = new Set(pending.map((p) => p.key))
+  const listKeys = new Set(list.keys)
+  const 只在json = [...pendKeys].filter((k) => !listKeys.has(k))
+  const 只在清单 = [...listKeys].filter((k) => !pendKeys.has(k))
+  const 一致 = list.available ? 只在json.length === 0 && 只在清单.length === 0 : null
+
+  // 已锚题型按叶归拢：一片叶吃了几个题型的考法
+  const byLeaf = new Map()
+  for (const a of anchored) {
+    if (!byLeaf.has(a.kp_id)) byLeaf.set(a.kp_id, { kp_id: a.kp_id, kp_name: a.kp_name, kp_missing: a.kp_missing, 题型: [] })
+    byLeaf.get(a.kp_id).题型.push({ key: a.key, 题型名: a.题型名 })
+  }
+
+  return {
+    available: true,
+    对齐: '对齐-003（题型簇层撤回：切回考点，题型标题并进 kp.desc）',
+    source: { map: MAP_REL, list: LIST_REL, list_available: list.available },
+    total: anchored.length + pending.length,
+    anchored_total: anchored.length,
+    pending_total: pending.length,
+    checklist_total: list.total,
+    checklist_done: list.done,
+    一致,
+    只在json,
+    只在清单,
+    ...leafStat,
+    leaf_covered: byLeaf.size, // 已锚题型落在多少片叶上
+    pending_by_lecture: [...new Set(pending.map((p) => p.讲))]
+      .filter((x) => x != null)
+      .sort((a, b) => a - b)
+      .map((n) => ({ 讲: n, count: pending.filter((p) => p.讲 === n).length })),
+    pending_rows: pending,
+    anchored_by_leaf: [...byLeaf.values()].sort((a, b) => String(a.kp_id).localeCompare(String(b.kp_id))),
+  }
+}
+
 function epKpDetail(db, id) {
   const k = one(db, 'SELECT * FROM kp WHERE id = ?', id)
   if (!k) return null
@@ -1463,6 +1698,78 @@ function epCriteria(db, q) {
  * 模版库 template —— 🔴 渲染永远在 agent 本地跑（HTML → Chrome → PDF），系统只登记模版与样张。
  * 本端点纯读：不新建、不改参数、不生成 PDF。停用的模版**不删**（发出去的册子还是老版式）。
  */
+const TPL_LAYERS = ['组件', '版式', '配方']
+
+/**
+ * 模版分层：组件（一个槽怎么排）› 版式（一整页什么骨架）› 配方（出哪套卷的选题+版式组合）。
+ *
+ * 🔴 层的正本是 `params.层`（主线在回填）。**回填了就用回填的**；没回填才按 id 约定倒推，
+ *   并把 `层_待回填:true` 随行端出去——页面必须标「层待回填」，让人知道这一格是**推的不是登记的**。
+ *   （与来源册那套「推法随行」同一个规矩：推来的东西必须自报是推的。）
+ */
+function templateLayer(t, params) {
+  const declared = params && typeof params === 'object' ? (params.层 ?? params.层级) : null
+  const d = String(declared ?? '').trim()
+  if (d && TPL_LAYERS.includes(d)) return { 层: d, 层_from: 'params.层', 层_待回填: false }
+  // ── id 约定回退（只按 id 认，不去猜 purpose 里的中文）──
+  const id = String(t.id ?? '')
+  let guess = null
+  if (/choice|option|slot/i.test(id)) guess = '组件'
+  else if (/^zj[_-]/i.test(id)) guess = '配方'
+  else if (/exam|a4|paper|layout/i.test(id)) guess = '版式'
+  return guess
+    ? { 层: guess, 层_from: 'id 约定回退', 层_待回填: true }
+    : // 🔴 推不出来就说推不出来，不硬塞进某一层
+      { 层: null, 层_from: null, 层_待回填: true }
+}
+
+/**
+ * 引用链：**params 里有什么画什么**。
+ *
+ * 🔴 这是本次最容易出事的一处，所以口径写死在这儿：关系一律从 `params_json` 里**读**出来，
+ *   绝不按「zj_u1 大概用 exam 吧」这类常识写死。没读到就是 `refs:[]`，页面显示「引用未登记」。
+ *   （写死一条臆造的关系 = 页面在编事实；出货时照着假引用核参数会真出错卷。）
+ *
+ * 两种能从 params 里读出来的引用：
+ *   ① **用了哪张版式**：自己的 `params.layout`（或 `params.版式`）是个 layout key，
+ *      去找**另一张**声明了同一个 layout key 的模版（现库：zj_* 的 layout=exam_paper → tpl-exam-v1）。
+ *   ② **含哪些组件**：params 的文本里直接出现了别的模版 id
+ *      （现库：tpl-exam-v1 的 `槽位[0]` 写着「choice(沿用 tpl-choice-v1 的 …)」）。
+ */
+function templateRefs(self, selfLayer, params, rawJson, others) {
+  const refs = []
+  const seen = new Set()
+  const push = (kind, t, via) => {
+    const key = `${kind}|${t.id}`
+    if (t.id === self.id || seen.has(key)) return
+    seen.add(key)
+    refs.push({ kind, id: t.id, name: t.name ?? t.id, via })
+  }
+  // ① layout key → 声明同 key 的那张**版式**。
+  // 🔴 这一步必须**有方向、认层**，否则同一个 layout key 会把所有同 key 的模版两两连起来：
+  //   现库 zj_u1/zj_u2/zj_mix/tpl-exam 四张的 params.layout 全是 "exam_paper"，
+  //   不认层就会画出「配方 zj_u1 使用版式 zj_u2」（两张都是配方）这种假关系。
+  //   规矩：**只有非版式层的模版**去解析自己的 layout key，且**只认落在版式层的**那张。
+  //   版式自己声明的 layout key 是它的身份不是引用，不给它连出去。
+  const lk = params && typeof params === 'object' ? String(params.layout ?? params.版式 ?? '').trim() : ''
+  if (lk && selfLayer.层 !== '版式') {
+    for (const o of others) {
+      if (o.id === self.id || o.层 !== '版式') continue
+      const ol = o.params && typeof o.params === 'object' ? String(o.params.layout ?? o.params.版式 ?? '').trim() : ''
+      if (ol && ol === lk) push('版式', o, `params.layout = "${lk}"`)
+    }
+  }
+  // ② params 文本里点名了别的模版 id（现库：tpl-exam-v1 的槽位串写着 tpl-choice-v1）
+  const text = String(rawJson ?? '')
+  if (text) {
+    for (const o of others) {
+      if (o.id === self.id) continue
+      if (text.includes(o.id)) push(o.层 === '组件' ? '组件' : (o.层 ?? '引用'), o, `params 里点名了 ${o.id}`)
+    }
+  }
+  return refs
+}
+
 function epTemplates(db, q) {
   const where = []
   const args = []
@@ -1480,18 +1787,22 @@ function epTemplates(db, q) {
      ORDER BY t.status, t.id`,
     ...args,
   )
-  return {
-    total: one(db, 'SELECT COUNT(*) AS c FROM template').c,
-    in_use: one(db, "SELECT COUNT(*) AS c FROM template WHERE status = '在用'").c,
-    with_sample: one(db, 'SELECT COUNT(*) AS c FROM template WHERE sample_asset IS NOT NULL').c,
-    shown: rows.length,
-    filters: { status: status || null },
-    rows: rows.map((t) => ({
+  // 🔴 引用链要跨行看，所以先把全表（不受 status 筛选影响）解析一遍当"字典"，
+  //   否则筛到「在用」时，指向一张停用版式的引用会凭空消失（= 页面骗人说没引用）。
+  const universe = all(db, 'SELECT id, name, params_json FROM template').map((t) => {
+    const params = t.params_json ? parseJson(t.params_json) : null
+    return { id: t.id, name: t.name, params, raw: t.params_json, ...templateLayer(t, params) }
+  })
+
+  const out = rows.map((t) => {
+    const params = t.params_json ? parseJson(t.params_json) : null
+    const layer = templateLayer(t, params)
+    return {
       id: t.id,
       name: t.name ?? null,
       purpose: t.purpose ?? null,
       book_kinds: t.book_kinds ?? null,
-      params: t.params_json ? parseJson(t.params_json) : null,
+      params,
       params_raw: t.params_json ?? null,
       pitfalls: t.pitfalls ?? null,
       version: t.version ?? null,
@@ -1502,7 +1813,23 @@ function epTemplates(db, q) {
       registered_by: t.registered_by ?? null,
       updated_at: t.updated_at ?? null,
       artifact_count: t.artifact_count,
-    })),
+      ...layer,
+      refs: templateRefs(t, layer, params, t.params_json, universe),
+    }
+  })
+
+  const layerStat = {}
+  for (const k of TPL_LAYERS) layerStat[k] = out.filter((t) => t.层 === k).length
+  return {
+    total: one(db, 'SELECT COUNT(*) AS c FROM template').c,
+    in_use: one(db, "SELECT COUNT(*) AS c FROM template WHERE status = '在用'").c,
+    with_sample: one(db, 'SELECT COUNT(*) AS c FROM template WHERE sample_asset IS NOT NULL').c,
+    shown: out.length,
+    filters: { status: status || null },
+    层_stat: layerStat,
+    层_未归: out.filter((t) => t.层 === null).length,
+    层_待回填: out.filter((t) => t.层_待回填 && t.层 !== null).length,
+    rows: out,
   }
 }
 
@@ -1591,10 +1918,105 @@ function epSetSaleState(body) {
   }
 }
 
+/**
+ * 卷面参数（满分 / 时长）的落点是 `paper.layout_json`（渲染从库读的依据，数据结构 §2.5）。
+ * 🔴 `paper_item.score` 实查**全库为 NULL**——所以「满分」只认 layout.full_score，
+ *   绝不拿逐题分值求和冒充（求和为 0 时显示「满分 0 分」比显示「未记」坏得多）。
+ *   逐题分值另开 `score_sum` 一格如实回：全空就是 null，页面显示「未逐题记分」。
+ */
+function paperHead(layout) {
+  const L = layout && typeof layout === 'object' ? layout : {}
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  return {
+    layout_key: L.layout ? String(L.layout) : null,
+    full_score: num(L.full_score),
+    duration_min: num(L.duration_min),
+    subtitle: L.subtitle ? String(L.subtitle) : null,
+    section_count: Array.isArray(L.sections) ? L.sections.length : null,
+  }
+}
+
+/** 卷库列表：paper 级一屏——卷名 / 题数 / 满分 / 时长 / 所属册 / 建卷时间 */
+function epPapers(db, q) {
+  const has细类 = hasCol(db, 'artifact', '细类')
+  const where = []
+  const args = []
+  const kind = q?.get('kind')
+  const status = q?.get('status')
+  const artifactId = q?.get('artifact_id')
+  if (kind) {
+    where.push('p.kind = ?')
+    args.push(kind)
+  }
+  if (status) {
+    where.push('p.status = ?')
+    args.push(status)
+  }
+  if (artifactId) {
+    where.push('p.artifact_id = ?')
+    args.push(artifactId)
+  }
+  const sql = where.length ? ` WHERE ${where.join(' AND ')}` : ''
+  const rows = all(
+    db,
+    `SELECT p.id, p.title, p.kind, p.ord, p.status, p.created_at, p.layout_json,
+            p.artifact_id, a.name AS artifact_name, a.status AS artifact_status,
+            ${has细类 ? 'a.细类' : 'NULL'} AS artifact_细类,
+            (SELECT COUNT(*) FROM paper_item pi WHERE pi.paper_id = p.id) AS item_count,
+            (SELECT SUM(pi.score) FROM paper_item pi WHERE pi.paper_id = p.id) AS score_sum,
+            (SELECT COUNT(*) FROM paper_item pi LEFT JOIN question qq ON qq.id = pi.question_id
+              WHERE pi.paper_id = p.id AND qq.id IS NULL) AS missing_count
+     FROM paper p LEFT JOIN artifact a ON a.id = p.artifact_id${sql}
+     ORDER BY p.created_at DESC, p.id`,
+    ...args,
+  )
+  const out = rows.map((p) => {
+    const layout = p.layout_json ? parseJson(p.layout_json) : null
+    return {
+      id: p.id,
+      title: p.title,
+      kind: p.kind,
+      ord: p.ord,
+      status: p.status,
+      created_at: p.created_at,
+      item_count: p.item_count,
+      score_sum: p.score_sum ?? null, // 全库现为 null：逐题分值没落库
+      missing_count: p.missing_count, // 🔴 题被删/断链的行数，如实标不吞
+      artifact_id: p.artifact_id ?? null,
+      // 🔴 所属册断链（artifact_id 指了一本不存在的册）与「本来就没挂册」是两件事，分开报
+      artifact_name: p.artifact_name ?? null,
+      artifact_status: p.artifact_status ?? null,
+      artifact_细类: p.artifact_细类 ?? null,
+      artifact_missing: p.artifact_id != null && p.artifact_name == null,
+      ...paperHead(layout),
+    }
+  })
+  return {
+    total: out.length,
+    filters: { kind: kind || null, status: status || null, artifact_id: artifactId || null },
+    kind_stat: all(db, 'SELECT kind, COUNT(*) AS c FROM paper GROUP BY kind ORDER BY kind').map((r) => ({
+      kind: r.kind,
+      count: r.c,
+    })),
+    status_stat: all(db, 'SELECT status, COUNT(*) AS c FROM paper GROUP BY status ORDER BY status').map((r) => ({
+      status: r.status,
+      count: r.c,
+    })),
+    item_total: one(db, 'SELECT COUNT(*) AS c FROM paper_item').c,
+    // 记了满分的卷数：现库 18/27——页面据此写明「另 N 卷卷头没记满分」，不填 0 冒充
+    with_full_score: out.filter((p) => p.full_score != null).length,
+    with_duration: out.filter((p) => p.duration_min != null).length,
+    rows: out,
+  }
+}
+
 function epPaperDetail(db, id) {
   const p = one(db, 'SELECT * FROM paper WHERE id = ?', id)
   if (!p) return null
-  const art = p.artifact_id ? one(db, 'SELECT id, name, kind, status FROM artifact WHERE id = ?', p.artifact_id) : null
+  const has细类 = hasCol(db, 'artifact', '细类')
+  const art = p.artifact_id
+    ? one(db, `SELECT id, name, kind, status, ${has细类 ? '细类' : 'NULL AS 细类'} FROM artifact WHERE id = ?`, p.artifact_id)
+    : null
   const dict = dictMap(db)
   const items = all(
     db,
@@ -1614,10 +2036,23 @@ function epPaperDetail(db, id) {
     missing: !it.blocks_json, // 断链如实标
     qtype_label: it.qtype_code ? dict[it.qtype_code] || it.qtype_code : null,
     diff_label: it.diff_code ? dict[it.diff_code] || it.diff_code : null,
+    // 逐题速览用的截断题面（卷库页列表态用它；全文仍在 blocks 里，两者并存不互斥）
+    stem: it.blocks_json ? stemBrief(it.blocks_json, 120) : '🔴 题已不在库（断链）',
+    // 挂了哪几片考点叶：认卷/查配比时最要紧的一格
+    kps: it.question_id
+      ? all(
+          db,
+          `SELECT k.id, k.name, qk.is_primary FROM question_kp qk
+           LEFT JOIN kp k ON k.id = qk.kp_id
+           WHERE qk.question_id = ? ORDER BY qk.is_primary DESC, k.id`,
+          it.question_id,
+        ).map((k) => ({ id: k.id ?? null, name: k.name ?? null, is_primary: !!k.is_primary, missing: k.name == null }))
+      : [],
     blocks: parseDoc(it.blocks_json),
     answer: parseDoc(it.answer_blocks_json),
     analysis: parseDoc(it.analysis_blocks_json),
   }))
+  const layout = p.layout_json ? parseJson(p.layout_json) : null
   return {
     id: p.id,
     title: p.title,
@@ -1625,8 +2060,10 @@ function epPaperDetail(db, id) {
     ord: p.ord,
     status: p.status,
     created_at: p.created_at,
-    layout: p.layout_json ? parseJson(p.layout_json) : null,
+    layout,
+    ...paperHead(layout),
     artifact: art,
+    item_count: items.length,
     items,
   }
 }
@@ -1636,6 +2073,8 @@ const ROUTES = [
   { re: /^\/api\/kb\/stats$/, run: (db) => epStats(db) },
   { re: /^\/api\/kb\/kg\/tree$/, run: (db) => buildTree(db) },
   { re: /^\/api\/kb\/kg\/aliases$/, run: (db, _m, q) => epKgAliases(db, q) },
+  // 🔴 静态段 /kg/patterns 必须写在 /kp/:id 之前无碍（两条前缀不同），但要在 /kg/tree 一族里挨着放
+  { re: /^\/api\/kb\/kg\/patterns$/, run: (db) => epKgPatterns(db) },
   { re: /^\/api\/kb\/kp\/(.+)$/, run: (db, m) => epKpDetail(db, decodeURIComponent(m[1])) },
   { re: /^\/api\/kb\/models$/, run: (db) => epModels(db) },
   { re: /^\/api\/kb\/criteria$/, run: (db, _m, q) => epCriteria(db, q) },
@@ -1648,6 +2087,8 @@ const ROUTES = [
   { re: /^\/api\/kb\/artifact-members$/, run: (db, _m, q) => epArtifactMembers(db, q) },
   { re: /^\/api\/kb\/artifacts\/(.+)$/, run: (db, m) => epArtifactDetail(db, decodeURIComponent(m[1])) },
   { re: /^\/api\/kb\/materials$/, run: (db, _m, q) => epMaterials(db, q) },
+  // 🔴 顺序敏感：静态段 /papers 必须排在 /papers/:id 之前，否则列表口会被当成 id="" 的详情
+  { re: /^\/api\/kb\/papers$/, run: (db, _m, q) => epPapers(db, q) },
   { re: /^\/api\/kb\/papers\/(.+)$/, run: (db, m) => epPaperDetail(db, decodeURIComponent(m[1])) },
 ]
 
@@ -1723,6 +2164,7 @@ const server = createServer((req, res) => {
         'GET /api/kb/stats',
         'GET /api/kb/kg/tree',
         'GET /api/kb/kg/aliases?kp_id=&kind=&q=（别名层 + 一词多挂/断链告警）',
+        'GET /api/kb/kg/patterns（讲义 173 题型的下落：103 已锚进 kp.desc / 70 待人工归位，对齐-003）',
         'GET /api/kb/kp/:id（考点节点详情＝聚合落点：档案/别名/挂靠模型/零挂载缺口）',
         'GET /api/kb/models（三张脸：exam_model 怎么造 / solution_model 怎么解 / question_pattern 已停用）',
         'GET /api/kb/criteria?line=&status=&q=（判据沉淀，废止带替代链）',
@@ -1740,7 +2182,8 @@ const server = createServer((req, res) => {
         'GET /api/kb/artifact-members?parent_id=&member_id=（合刊关系）',
         'GET /api/kb/materials?artifact_id=&account=A|B&active=&burned=&sale_state=&q=' +
           '（sale_state 可写「未标」查未标册；account 可重复给=OR）',
-        'GET /api/kb/papers/:id',
+        'GET /api/kb/papers?kind=&status=&artifact_id=（卷库列表：卷名/题数/满分/时长/所属册）',
+        'GET /api/kb/papers/:id（逐题预览：题号/题面/题型难度/考点/状态）',
         '🔴 POST /api/kb/sale-state {id, sale_state}（全站唯一写端点，只写 artifact.sale_state 一列）',
       ],
     })
@@ -1788,7 +2231,7 @@ if (!existsSync(DB_PATH)) {
 }
 // 🔴 起服务前的自检闸①：全站写端点必须恰好 1 条，且只能是 sale-state；读端点数必须与
 // 文件头「端点账」对得上。靠闸不靠注释——有人偷偷 push 第二条写口 / 加个口不改账，服务直接起不来。
-const EP_READ = 15 // 原 7 读 + PRD-003 的 2 读 + PRD-007 的 6 读（kg/aliases、kp/:id、models、criteria、templates、semantic/health）
+const EP_READ = 17 // 原 7 + PRD-003 的 2 + PRD-007 线2 的 6 + PRD-007 二轮页面线的 2（kg/patterns、papers 列表）
 const EP_WRITE = 1 // 全站唯一写口 sale-state
 if (WRITE_ROUTES.length !== EP_WRITE || WRITE_ROUTES[0].path !== '/api/kb/sale-state') {
   console.error(`🔴 写端点白名单被改了（现有 ${WRITE_ROUTES.length} 条）：页面只读原则=全站唯一写端点 sale-state`)

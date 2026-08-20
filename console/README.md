@@ -26,21 +26,38 @@ cd console; pnpm exec vite --port 4300 --strictPort --host 127.0.0.1
   不联网不打 CDN；md 进 DOM 前一律过 `src/kb/mathjax.ts` 的 `mdToHtml`（先转义后放定界符）。
 - 真库页的类型与组件都在 `src/kb/`，**不碰 `src/mock/types.ts`**（那是 mock 页的公共契约件）。
 
-端点共 **16 条 = 15 读 + 1 写**（原 7 读 → PRD-003 +2 读 +1 写 → PRD-007 +6 读）：
+端点共 **18 条 = 17 读 + 1 写**（原 7 读 → PRD-003 +2 读 +1 写 → PRD-007 线2 +6 读 → PRD-007 二轮 +2 读）：
 
-- 读（15）：`/api/kb/stats`、`/kg/tree`、`/questions`、`/questions/:id`、`/artifacts`、
+- 读（17）：`/api/kb/stats`、`/kg/tree`、`/questions`、`/questions/:id`、`/artifacts`、
   `/artifacts/:id`、`/artifact-members`（合刊关系）、`/materials`（物料清单）、`/papers/:id`、
-  以及 PRD-007 的六个：`/kg/aliases`（别名层 + 一词多挂/断链告警）、`/kp/:id`（考点节点详情=聚合落点）、
+  PRD-007 线2 的六个：`/kg/aliases`（别名层 + 一词多挂/断链告警）、`/kp/:id`（考点节点详情=聚合落点）、
   `/models`（三张脸：exam_model / solution_model / question_pattern**已停用**）、
   `/criteria`（判据沉淀，废止带替代链）、`/templates`（模版库，params/pitfalls 展开）、
-  `/semantic/health`（语意 serve :4315 探活，唯一不碰库的读口）。
-- 写（1）：`POST /api/kb/sale-state` —— 🔴 **PRD-007 一个写口都没加**，页面只读的原则不破。
+  `/semantic/health`（语意 serve :4315 探活，唯一不碰库的读口）；
+  PRD-007 二轮的两个：`/papers`（卷库列表：卷名/题数/满分/时长/所属册）、
+  `/kg/patterns`（讲义 173 题型的下落：103 已锚进 kp.desc / 70 待人工归位，对齐-003；
+  🔴 唯一一条**读磁盘正本文件**的读口，路径可用 `KG_PATTERN_MAP`/`KG_PATTERN_LIST` 顶掉以便测回退）。
+- 写（1）：`POST /api/kb/sale-state` —— 🔴 **PRD-007 两轮一个写口都没加**，页面只读的原则不破。
+
+二轮另给三个存量端点加了字段（都不新增写口）：`/artifacts` 加 `细类` + 人话名三件套
+（`display_name`/`display_from`/`code_name`）+ `retired`；`/templates` 加 `层` + `refs` 引用链；
+`/papers/:id` 加 `stem`（截 120 字）+ `kps`（考点挂靠）。
 
 `/questions` 的参数：`kp`（含别名 resolve）、`status`、`source_kind`、`qtype`/`difficulty`/`tag`/`unused`、
 分页 `page`/`size`，加 PRD-007 的 `textbook`/`use_level`/`src_book`（来源三维，可重复给=OR，
 写「未标」查没记的）、`ticket=1`（只看还挂着待处理工单的题）、`like=`（语意搜索）。
 
-🔴 三条口径，改代码前先看：
+🔴 六条口径，改代码前先看：
+- **推来的东西必须自报是推的**：人话名随行回 `display_from`、模版层随行回 `层_from` + `层_待回填`、
+  来源册随行回 `src_book_from`。页面照着显示，**不许把推的显示成登记的**。
+- **引用链只画 params 里读得到的**：配方→版式来自 `params.layout` 且**只认落在版式层的**那张
+  （两张配方共享同一 layout key 不得互相引用——这是二轮实测抓到的真 bug，已由测试钉死）；
+  版式→组件来自 params 文本点名。读不到就 `refs:[]`，页面显示「引用未登记」，绝不按常识写死。
+- **缺列/缺文件优雅回退，但不假装有值**：`artifact.细类` 缺列 ⇒ `细类_available:false` + 整列 null，
+  页面退回全量一张表；题型锚定正本文件缺失 ⇒ `available:false` + 说清哪个文件，**不编计数**。
+  两条回退路径都有测试覆盖（回退分支写了不测 = 等于没写）。
+- **满分只认 `paper.layout_json.full_score`**：`paper_item.score` 实查全库为 NULL，
+  拿逐题分值求和会得到 0——「满分 0 分」比「未记」坏得多。
 - **来源册是现推的不是库里的列**：prov 各产线各记各的键，读 API 按固定优先序推
   （卷名 › 卷 › punch_doc→artifact › 讲→source_raw 首段 › model_id），每行随行回 `src_book_from`
   说明这一格从哪来——页面照着显示，不许另发明第二套。
@@ -55,13 +72,16 @@ cd console; pnpm exec vite --port 4300 --strictPort --host 127.0.0.1
 ## 自证怎么跑
 
 ```powershell
-node --test console\server\kb-read-api-prd003.test.mjs   # 发布运营域 + 写端点越界闸（26 条）
-node --test console\server\kb-read-api-prd007.test.mjs   # 维护域 6 口 + 题库增强（17 条）
-cd console; pnpm build                                    # tsc -b && vite build
+node --test console\server\kb-read-api-prd003.test.mjs    # 发布运营域 + 写端点越界闸（26 条）
+node --test console\server\kb-read-api-prd007.test.mjs    # 维护域 6 口 + 题库增强（17 条）
+node --test console\server\kb-read-api-prd007b.test.mjs   # 二轮 2 口 + 细类/人话名/层与引用链（19 条）
+cd console; pnpm build                                     # tsc -b && vite build
 ```
 
-两个测试套都在临时目录按 `工具箱/库/schema_kb.sql` 现建空库跑，**不碰 `知识库/kb.db`**；
-默认端口 4311 / 4314（可用 `KB_API_TEST_PORT` 顶掉），绝不撞主位常驻的 4310。
+三个测试套都在临时目录按 `工具箱/库/schema_kb.sql` 现建空库跑，**不碰 `知识库/kb.db`**；
+默认端口 4311 / 4314 / 4316（回退分支另起 4317），可用 `KB_API_TEST_PORT` 顶掉，绝不撞主位常驻的 4310。
+🔴 **三个套别用一条 `node --test` 一起跑**：prd003 默认占 4311，与自测实例撞口会齐刷刷报「API 进程退出」；
+逐个跑，或各给一个 `KB_API_TEST_PORT`。
 
 ---
 

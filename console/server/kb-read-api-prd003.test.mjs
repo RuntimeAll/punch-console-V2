@@ -482,7 +482,7 @@ test('考点模糊 resolve：% 与 _ 只当字面量，一律 unresolved（转�
 // 🔴 数字随口子增减改（PRD-007 +6 读：kg/aliases、kp/:id、models、criteria、templates、
 //    semantic/health）；**闸本身不动**——它守的是「自报数 == 实际条数 == 横幅」这三处一致，
 //    不是守某个具体数字。改数字时三处一起改，否则这条测试当场红。
-const EP_READ_EXPECT = 15
+const EP_READ_EXPECT = 17 // PRD-007 二轮 +2 读（kg/patterns、papers 列表），写口仍恒 1
 const EP_WRITE_EXPECT = 1
 test(`端点账自报准数：${EP_READ_EXPECT} 读 + ${EP_WRITE_EXPECT} 写（曾自报 11 实为 10 的反例闸）`, async () => {
   const total = EP_READ_EXPECT + EP_WRITE_EXPECT

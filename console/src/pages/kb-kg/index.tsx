@@ -22,9 +22,10 @@ import type { DataNode } from 'antd/es/tree'
 import { useSearchParams } from 'react-router-dom'
 import PageFrame from '@/components/PageFrame'
 import { kbApi } from '@/kb/api'
-import type { KbAliasRow, KbAliases, KbKpDetail, KbKpNode, KbTree } from '@/kb/types'
+import type { KbAliasRow, KbAliases, KbKgPatterns, KbKpDetail, KbKpNode, KbTree } from '@/kb/types'
 import '@/kb/kb.css'
 import { KpDetail } from './KpDetail'
+import { PatternFate } from './PatternFate'
 
 /**
  * 维护 · 知识图谱 · 真库 /kb/kg（PRD-007 线2 去 mock 第 1 页）
@@ -114,6 +115,8 @@ function ancestorsOf(nodes: KbKpNode[], id: string): string[] {
 export function KbKg() {
   const [tree, setTree] = useState<KbTree | null>(null)
   const [alias, setAlias] = useState<KbAliases | null>(null)
+  const [patterns, setPatterns] = useState<KbKgPatterns | null>(null)
+  const [patternErr, setPatternErr] = useState('')
   const [detail, setDetail] = useState<KbKpDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [err, setErr] = useState('')
@@ -152,6 +155,11 @@ export function KbKg() {
       .aliases()
       .then(setAlias)
       .catch((e) => setErr(String(e.message ?? e)))
+    // 🔴 题型下落读的是磁盘正本文件，挂了不该把整页拖红——单独收错，本块自己显示原因
+    kbApi
+      .kgPatterns()
+      .then(setPatterns)
+      .catch((e) => setPatternErr(String(e.message ?? e)))
   }, [])
 
   useEffect(() => {
@@ -413,7 +421,10 @@ export function KbKg() {
         </Col>
       </Row>
 
-      {/* ③ 别名表：产线词 → 叶子的翻译层（老区 resolve 命中率 2%~29% 的解药） */}
+      {/* ③ 题型下落：讲义 173 个「题型N」并进考点的账（对齐-003），含 70 个待人工归位 */}
+      <PatternFate data={patterns} err={patternErr} />
+
+      {/* ④ 别名表：产线词 → 叶子的翻译层（老区 resolve 命中率 2%~29% 的解药） */}
       <Card
         size="small"
         style={{ marginTop: 12 }}
@@ -437,6 +448,47 @@ export function KbKg() {
           </Space>
         }
       >
+        {/* 🔴 用户走查第二问「别名干啥的」——三句话定位，摆在表头上方，别让人对着一张词表猜用途 */}
+        <div
+          style={{
+            background: '#fafafa',
+            border: '1px solid #f0f0f0',
+            borderRadius: 4,
+            padding: '10px 12px',
+            marginBottom: 10,
+            fontSize: 13,
+            lineHeight: 2,
+          }}
+        >
+          <div>
+            <Tag color="green" style={{ marginInlineEnd: 6 }}>
+              正本
+            </Tag>
+            <b>KG 叶是唯一正本</b>——题、册、模型挂考点时<b>只存叶 id</b>，别名一个都不存。
+            别名层塌了，挂载关系一条都不受影响。
+          </div>
+          <div>
+            <Tag color="blue" style={{ marginInlineEnd: 6 }}>
+              干什么用
+            </Tag>
+            <b>别名 = 外部叫法 → 唯一叶的「进门翻译」</b>：录入 resolve 与检索输入端把讲义原词、
+            产线词翻成叶 id。按 <b>对齐-002</b> 口径只收<b>正向产线词</b>——
+            <b>不为历史数据铸兼容名</b>（对不上现行叶的历史数据是弃或人工重标，不做特别兼容）。
+          </div>
+          <div>
+            <Tag style={{ marginInlineEnd: 6 }}>本页用途</Tag>
+            <b>查坏翻译</b>：一词两叶 = 坏账（resolve 必二义），现{' '}
+            <b style={{ color: (alias?.ambiguous.length ?? 0) > 0 ? '#cf1322' : '#389e0d' }}>
+              {alias?.ambiguous.length ?? 0}
+            </b>
+            {' '}处；别名断链（指向不存在的叶）现{' '}
+            <b style={{ color: (alias?.broken_total ?? 0) > 0 ? '#cf1322' : '#389e0d' }}>
+              {alias?.broken_total ?? 0}
+            </b>
+            {' '}处。加别名 / 并叶走 KG维护 skill，本页只读。
+          </div>
+        </div>
+
         {alias && alias.ambiguous.length > 0 ? (
           <Alert
             type="error"

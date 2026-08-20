@@ -5,11 +5,13 @@
 import type {
   KbAliases,
   KbArtifactDetail,
-  KbArtifactRow,
+  KbArtifactList,
   KbCriteria,
+  KbKgPatterns,
   KbKpDetail,
   KbModels,
   KbPaperDetail,
+  KbPapers,
   KbQuestionDetail,
   KbQuestionPage,
   KbSemanticHealth,
@@ -100,10 +102,28 @@ export const kbApi = {
     return get<KbQuestionPage>(`/questions?${p.toString()}`)
   },
   question: (id: string) => get<KbQuestionDetail>(`/questions/${encodeURIComponent(id)}`),
-  artifacts: () => get<{ total: number; rows: KbArtifactRow[] }>('/artifacts'),
+  artifacts: () => get<KbArtifactList>('/artifacts'),
   artifact: (id: string) => get<KbArtifactDetail>(`/artifacts/${encodeURIComponent(id)}`),
+  /** 卷库列表（paper 级）：卷名 / 题数 / 满分 / 时长 / 所属册 */
+  papers: (q: { kind?: string; status?: string; artifact_id?: string } = {}) => {
+    const p = new URLSearchParams()
+    if (q.kind) p.set('kind', q.kind)
+    if (q.status) p.set('status', q.status)
+    if (q.artifact_id) p.set('artifact_id', q.artifact_id)
+    const s = p.toString()
+    return get<KbPapers>(`/papers${s ? `?${s}` : ''}`)
+  },
   paper: (id: string) => get<KbPaperDetail>(`/papers/${encodeURIComponent(id)}`),
+  /** 讲义 173 题型的下落（对齐-003）：103 已锚进 kp.desc / 70 待人工归位 */
+  kgPatterns: () => get<KbKgPatterns>('/kg/patterns'),
 }
+
+/** 册细类的中文说明（页签下的一句话，值域正本 = artifact.细类 的 CHECK） */
+export const ARTIFACT_SUBKINDS = [
+  { value: '组卷册', label: '组卷册', desc: 'v2 产线组出来的卷——库里挂着 paper，能逐题看' },
+  { value: '发布包', label: '发布包', desc: '打包上架的销售件——note 里带宣发字段（标题候选 / 商品描述 / 网盘链接）' },
+  { value: '历史册', label: '历史册', desc: '从 punch 资料库吃进来的老货——只有账没有卷' },
+] as const
 
 /** 状态/来源的中文选项（值域正本=库里的 CHECK 与 dict_item；这里只做筛选器下拉） */
 export const QUESTION_STATUS = ['草稿', '已审', '上架', '退役']

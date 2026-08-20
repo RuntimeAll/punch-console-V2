@@ -520,8 +520,17 @@ def render_card(idx, data, ans, ctx):
             o.append('<div class="cols" style="grid-template-columns:repeat(%d,1fr)">%s</div>'
                      % (cols, ''.join(parts)))
         elif each:
-            o.append(''.join(p + '<div class="sp" style="height:%gmm"></div>' % each
-                             for p in parts))
+            # 🔴 作答留白走 margin-bottom 不走垫片 div（2026-08-20 用户打回改）：
+            #    垫片跨页时剩余高度会被带到下一页顶，把下一题从页顶推下来；
+            #    CSS 分页规范对**跨页（非强制）边界的 margin 截断归零**——页尾自然吃掉
+            #    留白、下一题永远顶格起排，正是「题完整落新页必须从头开始」的语义。
+            #    末节末题 margin 置零：强制分页（卡尾）不截断 margin，会顶出空白页（卷3 旧伤）。
+            last_sec = si == len(secs) - 1
+            o.append(''.join(
+                p if (last_sec and j == len(parts) - 1) else
+                p.replace('<div class="q">',
+                          '<div class="q" style="margin-bottom:%gmm">' % each, 1)
+                for j, p in enumerate(parts)))
         else:
             o.append(''.join(parts))
 

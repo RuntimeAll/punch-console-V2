@@ -614,6 +614,21 @@ def unit_exam_paper():
     ok('🔴 _unnb 拆包：超长 nowrap 渲完一个不剩（内容一字不动）',
        not EP._long_nb(card_nb) and '长' * 30 in card_nb)
 
+    # ── gap_each 留白=margin 不=垫片（2026-08-20 用户打回：跨页垫片把下一题从页顶推下）──
+    s4, l4, d4 = _ep_case()
+    s4[0]['gap_each'] = 5
+    s4[1]['gap_each'] = 40
+    card_g = EP.render_card(0, d4, False, _ep_ctx(s4, l4))
+    ok('🔴 gap_each 走 margin-bottom（跨页自动截断，下一题顶格）',
+       card_g.count('class="q" style="margin-bottom:5mm"') == 2
+       and card_g.count('class="q" style="margin-bottom:40mm"') == 1
+       and '<div class="sp"' not in card_g, card_g[:0])
+    ok('🔴 末节末题 margin 置零（强制分页不截断 margin，会顶出空白页）',
+       card_g.count('margin-bottom:40mm') == 1, card_g[:0])
+    ans_g = EP.render_card(0, d4, True, _ep_ctx(s4, l4))
+    ok('答案卷无作答留白 margin', 'margin-bottom:5mm' not in ans_g
+       and 'margin-bottom:40mm' not in ans_g)
+
     # ── CSS 口径（卷 3 像素实测反推，改一个数就该有人看见）──
     css = EP.css()
     ok('缺省正文 11.2pt / 行距 2.08 / 悬挂缩进 1em',

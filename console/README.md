@@ -1,8 +1,10 @@
 # 展示台 console
 
-## 真库页怎么起（/kb/questions、/kb/artifacts）
+## 真库页怎么起（/kb/* 六页）
 
-这两页不吃 mock，直连 `知识库/kb.db`，取数走本目录下的薄读 API，**必须两个进程都起**：
+真库组现有 **6 页**（PRD-007 线2 去 mock 后）：`/kb/questions`、`/kb/artifacts`、`/kb/kg`、
+`/kb/models`、`/kb/criteria`、`/kb/templates`。它们不吃 mock，直连 `知识库/kb.db`，
+取数走本目录下的薄读 API，**必须两个进程都起**：
 
 ```powershell
 # ① kb 薄读 API（:4310，只读打开；KB_DB 不给就用 <v2根>/知识库/kb.db）
@@ -24,15 +26,42 @@ cd console; pnpm exec vite --port 4300 --strictPort --host 127.0.0.1
   不联网不打 CDN；md 进 DOM 前一律过 `src/kb/mathjax.ts` 的 `mdToHtml`（先转义后放定界符）。
 - 真库页的类型与组件都在 `src/kb/`，**不碰 `src/mock/types.ts`**（那是 mock 页的公共契约件）。
 
-端点共 **10 条 = 9 读 + 1 写**（PRD-003 在原 7 读上 +2 读 +1 写）：
+端点共 **16 条 = 15 读 + 1 写**（原 7 读 → PRD-003 +2 读 +1 写 → PRD-007 +6 读）：
 
-- 读（9）：`/api/kb/stats`、`/kg/tree`、`/questions`（kp 含别名 resolve、status、source_kind、
-  qtype/difficulty/tag/unused、分页）、`/questions/:id`、`/artifacts`、`/artifacts/:id`、
-  `/artifact-members`（合刊关系，新）、`/materials`（物料清单，新）、`/papers/:id`。
-- 写（1）：`POST /api/kb/sale-state`（新）。
+- 读（15）：`/api/kb/stats`、`/kg/tree`、`/questions`、`/questions/:id`、`/artifacts`、
+  `/artifacts/:id`、`/artifact-members`（合刊关系）、`/materials`（物料清单）、`/papers/:id`、
+  以及 PRD-007 的六个：`/kg/aliases`（别名层 + 一词多挂/断链告警）、`/kp/:id`（考点节点详情=聚合落点）、
+  `/models`（三张脸：exam_model / solution_model / question_pattern**已停用**）、
+  `/criteria`（判据沉淀，废止带替代链）、`/templates`（模版库，params/pitfalls 展开）、
+  `/semantic/health`（语意 serve :4315 探活，唯一不碰库的读口）。
+- 写（1）：`POST /api/kb/sale-state` —— 🔴 **PRD-007 一个写口都没加**，页面只读的原则不破。
 
-🔴 `/materials?q=` 与考点模糊 resolve 的关键词进 LIKE 前一律转义 `% _ \` 并带 `ESCAPE '\'`——
-`q=%` 只匹配含百分号的文案，不是整库。
+`/questions` 的参数：`kp`（含别名 resolve）、`status`、`source_kind`、`qtype`/`difficulty`/`tag`/`unused`、
+分页 `page`/`size`，加 PRD-007 的 `textbook`/`use_level`/`src_book`（来源三维，可重复给=OR，
+写「未标」查没记的）、`ticket=1`（只看还挂着待处理工单的题）、`like=`（语意搜索）。
+
+🔴 三条口径，改代码前先看：
+- **来源册是现推的不是库里的列**：prov 各产线各记各的键，读 API 按固定优先序推
+  （卷名 › 卷 › punch_doc→artifact › 讲→source_raw 首段 › model_id），每行随行回 `src_book_from`
+  说明这一格从哪来——页面照着显示，不许另发明第二套。
+- **`--like` 是加速器不是依赖**：serve 挂了 `/semantic/health` 回 `ok:false`（页面收起搜索框），
+  `?like=` 直接 500 明确报错——**绝不静默退回「按时间排」冒充语意命中**。
+- **prov_json 一律先 `json_valid` 再 `json_extract`**：库里一条坏 JSON 会让裸 `json_extract`
+  整条查询抛 malformed JSON，一道坏题打死一屏题库。
+
+🔴 `/materials?q=`、`/kg/aliases?q=`、`/criteria?q=` 与考点模糊 resolve 的关键词进 LIKE 前
+一律转义 `% _ \` 并带 `ESCAPE '\'`——`q=%` 只匹配含百分号的文案，不是整库。
+
+## 自证怎么跑
+
+```powershell
+node --test console\server\kb-read-api-prd003.test.mjs   # 发布运营域 + 写端点越界闸（26 条）
+node --test console\server\kb-read-api-prd007.test.mjs   # 维护域 6 口 + 题库增强（17 条）
+cd console; pnpm build                                    # tsc -b && vite build
+```
+
+两个测试套都在临时目录按 `工具箱/库/schema_kb.sql` 现建空库跑，**不碰 `知识库/kb.db`**；
+默认端口 4311 / 4314（可用 `KB_API_TEST_PORT` 顶掉），绝不撞主位常驻的 4310。
 
 ---
 

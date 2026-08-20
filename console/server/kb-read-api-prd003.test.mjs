@@ -479,15 +479,24 @@ test('考点模糊 resolve：% 与 _ 只当字面量，一律 unresolved（转�
 })
 
 // ── ⑤-2 端点账反例闸 ────────────────────────────────────────────────────
-test('端点账自报准数：9 读 + 1 写 = 10（曾自报 11 的反例闸）', async () => {
+// 🔴 数字随口子增减改（PRD-007 +6 读：kg/aliases、kp/:id、models、criteria、templates、
+//    semantic/health）；**闸本身不动**——它守的是「自报数 == 实际条数 == 横幅」这三处一致，
+//    不是守某个具体数字。改数字时三处一起改，否则这条测试当场红。
+const EP_READ_EXPECT = 15
+const EP_WRITE_EXPECT = 1
+test(`端点账自报准数：${EP_READ_EXPECT} 读 + ${EP_WRITE_EXPECT} 写（曾自报 11 实为 10 的反例闸）`, async () => {
+  const total = EP_READ_EXPECT + EP_WRITE_EXPECT
   const nf = await get('/api/kb/不存在的口')
   assert.equal(nf.status, 404)
-  assert.equal(nf.body.端点合计, '9 读 + 1 写 = 10')
-  assert.equal(nf.body.endpoints.length, 10, '🔴 清单条数与自报数对不上')
-  assert.equal(nf.body.endpoints.filter((e) => e.startsWith('GET ')).length, 9)
-  assert.equal(nf.body.endpoints.filter((e) => e.includes('POST ')).length, 1)
+  assert.equal(nf.body.端点合计, `${EP_READ_EXPECT} 读 + ${EP_WRITE_EXPECT} 写 = ${total}`)
+  assert.equal(nf.body.endpoints.length, total, '🔴 清单条数与自报数对不上')
+  assert.equal(nf.body.endpoints.filter((e) => e.startsWith('GET ')).length, EP_READ_EXPECT)
+  assert.equal(nf.body.endpoints.filter((e) => e.includes('POST ')).length, EP_WRITE_EXPECT)
+  // 🔴 页面只读的硬账：写端点永远只有 sale-state 一条，多一条就红
+  assert.equal(EP_WRITE_EXPECT, 1)
+  assert.equal(nf.body.endpoints.filter((e) => e.includes('POST ')).filter((e) => e.includes('/api/kb/sale-state')).length, 1)
   // 启动横幅也得报同一个数（横幅是人眼唯一看得见的自报口）
-  assert.match(banner, /端点 9 读 \+ 1 写 = 10/)
+  assert.match(banner, new RegExp(`端点 ${EP_READ_EXPECT} 读 \\+ ${EP_WRITE_EXPECT} 写 = ${total}`))
 })
 
 // ── ⑤-3 缺 sale_state 列 ⇒ 拒启 ────────────────────────────────────────

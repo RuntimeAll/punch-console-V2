@@ -21,8 +21,14 @@
  *
  * 端点账（🔴 改口子必须同步改这三处：ROUTES/WRITE_ROUTES、下面的 EP_READ/EP_WRITE 常量、
  *   404 的 endpoints 清单——数量对不上服务直接起不来，见文件末尾自检闸）：
- *   **10 条 = 9 读 + 1 写**。其中 PRD-003 在原有 7 读的底子上 **+2 读**
- *   （GET /api/kb/materials、GET /api/kb/artifact-members）**+1 写**（POST /api/kb/sale-state）。
+ *   **16 条 = 15 读 + 1 写**。账的来历：原 7 读；PRD-003 **+2 读**
+ *   （GET /api/kb/materials、GET /api/kb/artifact-members）**+1 写**（POST /api/kb/sale-state）；
+ *   PRD-007 展示台去 mock **+6 读**（kg/aliases、kp/:id、models、criteria、templates、semantic/health），
+ *   并给 /api/kb/questions 加来源三维筛选、审核工单标记与 --like 语意搜索。
+ *   🔴 **写端点数仍是 1**：PRD-007 一个写口都不加（页面只读、写归 agent 的原则不破）。
+ *
+ * 🔴 端点可以是**异步**的（返回 Promise）：语意搜索要等 :4315 的 serve 回话。
+ *   异步那条路的只读句柄由 then 链关（见文件末尾 dispatcher），不许走 finally 提前关。
  *
  * 依赖：Node 内置 node:sqlite（本机 node v24.11.1 起可用）。
  *   🔴 不许换 better-sqlite3：这台机器有原生模块编译失败史（punch-console 的 pnpm dev 至今被它拦）。
@@ -50,6 +56,9 @@ const V2_ROOT = resolve(HERE, '..', '..') // …/ai-bkb-v2（worktree 里=本位
 const DB_PATH = process.env.KB_DB ? resolve(process.env.KB_DB) : resolve(V2_ROOT, '知识库', 'kb.db')
 const PORT = Number(process.env.KB_API_PORT || 4310)
 const HOST = '127.0.0.1'
+/** 语意常驻 serve（工具箱/检索/embed_serve.py，启动台管）。🔴 它是**加速器不是依赖**：
+ *  挂了只影响 --like 语意搜索一处，其余端点照常——页面探活失败就把搜索框收起来，优雅降级。 */
+const EMBED_PORT = Number(process.env.EMBED_PORT || 4315)
 
 /** 🔴 只读句柄：每请求开一把、用完就关。SQLite 打开极廉价，换来的是
  *  ①永远看到 agent 刚写进去的新数据 ②绝不长期持锁挡住写方。 */
@@ -295,9 +304,43 @@ function epStats(db) {
   }
 }
 
-function epQuestions(db, q) {
-  const page = Math.max(1, Number(q.get('page') || 1))
-  const size = Math.min(200, Math.max(1, Number(q.get('size') || 20)))
+/**
+ * 🔴 prov_json 取值的唯一写法：**先 json_valid 再 json_extract**。
+ * 库里有一条坏 JSON，裸 json_extract 会让整条查询抛 "malformed JSON"——
+ * 一道坏题把整页题库打成 500，是典型的「一条烂数据毁一屏」。path 一律是本文件的字面量，无用户输入。
+ */
+const P = (path) => `(CASE WHEN q.prov_json IS NOT NULL AND json_valid(q.prov_json) THEN json_extract(q.prov_json,'${path}') END)`
+
+/**
+ * 🔴 「来源册」是**现推的展示分组，不是库里的列**——prov 里根本没有统一的册字段，
+ * 各产线各记各的键（试卷记 卷名/卷、打卡记 punch_doc、讲义记 讲、DSL 记 model_id）。
+ * 推法按下面这个固定优先序，且随行回吐 `src_book_from`（这一格是从哪个键推出来的），
+ * 页面照着显示推法，**不许页面自己再发明第二套**（口径只有这一份）。
+ *   卷名 › 卷 › 打卡册（punch_doc→punch_map→artifact.name）› 讲义（source_raw 首段）› DSL 出题 › 未标
+ */
+const SRC_BOOK_SQL = `COALESCE(
+  ${P('$.卷名')},
+  CASE WHEN ${P('$.卷')} IS NOT NULL THEN '试卷 ' || ${P('$.卷')} END,
+  (SELECT a.name FROM punch_map pm JOIN artifact a ON a.id = pm.kb_id
+    WHERE pm.kind = 'doc' AND pm.punch_id = ${P('$.punch_doc')}),
+  CASE WHEN ${P('$.讲')} IS NOT NULL THEN
+    CASE WHEN q.source_raw IS NOT NULL AND instr(q.source_raw, '·') > 0
+         THEN substr(q.source_raw, 1, instr(q.source_raw, '·') - 1) ELSE q.source_raw END END,
+  CASE WHEN ${P('$.model_id')} IS NOT NULL THEN 'DSL 出题（无来源册）' END
+)`
+const SRC_BOOK_FROM_SQL = `CASE
+  WHEN ${P('$.卷名')} IS NOT NULL THEN 'prov.卷名'
+  WHEN ${P('$.卷')} IS NOT NULL THEN 'prov.卷'
+  WHEN ${P('$.punch_doc')} IS NOT NULL THEN 'prov.punch_doc→punch_map→artifact'
+  WHEN ${P('$.讲')} IS NOT NULL THEN 'prov.讲→source_raw 首段'
+  WHEN ${P('$.model_id')} IS NOT NULL THEN 'prov.model_id'
+  ELSE NULL END`
+
+/**
+ * 题表 WHERE 拼装（分页与语意排序两条路共用一份，改一处两条路一起变）。
+ * 返回 { where, args, meta } —— meta 里带 resolve 不到的词，调用方原样端给页面。
+ */
+function questionWhere(db, q) {
   const where = []
   const args = []
   let kpHit = null
@@ -366,82 +409,270 @@ function epQuestions(db, q) {
     )
   }
 
-  const sql = where.length ? ` WHERE ${where.join(' AND ')}` : ''
-  const total = one(db, `SELECT COUNT(*) AS c FROM question q${sql}`, ...args).c
-  const rows = all(
-    db,
-    `SELECT q.id, q.blocks_json, q.qtype_code, q.diff_code, q.source_kind, q.source_raw,
-            q.mother_qid, q.variant_op, q.status, q.created_at
-     FROM question q${sql}
-     ORDER BY q.created_at DESC, q.id
-     LIMIT ? OFFSET ?`,
-    ...args,
-    size,
-    (page - 1) * size,
-  )
+  // ── PRD-007 来源筛选（prov 三维）：教材版本 / 版本使用级 / 来源册 ──
+  //    🔴 值域来自库里现有的值（下面 facets 现算），不在代码里写死枚举；
+  //    传了库里没有的值不当「不过滤」，照 SQL 语义自然落 0 条（值本身原样回给页面）。
+  const provFilters = {}
+  for (const [key, expr] of [
+    ['textbook', P('$.教材版本')],
+    ['use_level', P('$.版本使用级')],
+    ['src_book', SRC_BOOK_SQL],
+  ]) {
+    const vals = q.getAll(key).filter((v) => v !== '')
+    if (!vals.length) continue
+    provFilters[key] = vals
+    const NULLW = ['未标', 'null', '空']
+    const real = vals.filter((v) => !NULLW.includes(v))
+    const seg = []
+    if (real.length) {
+      seg.push(`${expr} IN (${marks(real.length)})`)
+      args.push(...real)
+    }
+    if (vals.length > real.length) seg.push(`${expr} IS NULL`)
+    where.push(`(${seg.join(' OR ')})`)
+  }
 
-  const dict = dictMap(db)
-  const ids = rows.map((r) => r.id)
-  const kpByQ = {}
-  const varByQ = {}
-  if (ids.length) {
-    for (const r of all(
-      db,
-      `SELECT qk.question_id, qk.kp_id, qk.is_primary, kp.name
-       FROM question_kp qk JOIN kp ON kp.id = qk.kp_id
-       WHERE qk.question_id IN (${marks(ids.length)})
-       ORDER BY qk.is_primary DESC, kp.id`,
-      ...ids,
-    )) {
-      ;(kpByQ[r.question_id] ||= []).push({ id: r.kp_id, name: r.name, is_primary: !!r.is_primary })
-    }
-    for (const r of all(
-      db,
-      `SELECT mother_qid, COUNT(*) AS c FROM question
-       WHERE mother_qid IN (${marks(ids.length)}) GROUP BY mother_qid`,
-      ...ids,
-    )) {
-      varByQ[r.mother_qid] = r.c
-    }
+  // 审核工单：ticket=1 只看「还挂着待处理工单」的题（闸④ 等级审的未了结件）
+  const ticketRaw = q.get('ticket')
+  let ticket = null
+  if (ticketRaw !== null && ticketRaw !== '') {
+    ticket = !/^(0|false|no|否)$/i.test(ticketRaw)
+    where.push(
+      `${ticket ? 'EXISTS' : 'NOT EXISTS'} (SELECT 1 FROM review_ticket rt WHERE rt.ref = q.id AND rt.status = '待处理')`,
+    )
   }
 
   return {
-    total,
-    page,
-    size,
-    kp_filter: kpHit ? { ...kpHit, word: kpWord } : null,
-    kp_unresolved: kpMiss, // 🔴 词没 resolve 到，页面照实说
-    // 🔴 同上：题型/难度/标签翻不出的词原样回给页面，页面必须显示「这个词库里没有」而不是「没有结果」
-    unresolved: Object.keys(unresolved).length ? unresolved : null,
-    filters: {
-      kp: kpWord || null,
-      status: status || null,
-      source_kind: sk || null,
-      qtype: q.getAll('qtype'),
-      difficulty: q.getAll('difficulty'),
-      tag: q.getAll('tag'),
-      unused,
+    where,
+    args,
+    sql: where.length ? ` WHERE ${where.join(' AND ')}` : '',
+    meta: {
+      kp_filter: kpHit ? { ...kpHit, word: kpWord } : null,
+      kp_unresolved: kpMiss, // 🔴 词没 resolve 到，页面照实说
+      // 🔴 同上：题型/难度/标签翻不出的词原样回给页面，页面必须显示「这个词库里没有」而不是「没有结果」
+      unresolved: Object.keys(unresolved).length ? unresolved : null,
+      filters: {
+        kp: kpWord || null,
+        status: status || null,
+        source_kind: sk || null,
+        qtype: q.getAll('qtype'),
+        difficulty: q.getAll('difficulty'),
+        tag: q.getAll('tag'),
+        unused,
+        textbook: provFilters.textbook ?? [],
+        use_level: provFilters.use_level ?? [],
+        src_book: provFilters.src_book ?? [],
+        ticket,
+        like: (q.get('like') || '').trim() || null,
+      },
     },
-    rows: rows.map((r) => ({
-      id: r.id,
-      stem: stemBrief(r.blocks_json),
-      qtype_code: r.qtype_code,
-      qtype_label: r.qtype_code ? dict[r.qtype_code] || r.qtype_code : null,
-      diff_code: r.diff_code,
-      diff_label: r.diff_code ? dict[r.diff_code] || r.diff_code : null,
-      source_kind: r.source_kind,
-      source_label: r.source_kind ? dict[r.source_kind] || r.source_kind : null,
-      source_raw: r.source_raw,
-      kps: kpByQ[r.id] || [],
-      status: r.status,
-      // 血缘有无 = 有母题 或 有变体（SSOT 就是 question.mother_qid 这一列，不查平行 trace 表）
-      has_mother: !!r.mother_qid,
-      variant_count: varByQ[r.id] || 0,
-      has_lineage: !!r.mother_qid || (varByQ[r.id] || 0) > 0,
-      variant_op: r.variant_op,
-      created_at: r.created_at,
-    })),
   }
+}
+
+/** 一批 id → 列表行（**按传入 id 的序**出，语意排序那条路靠它保住名次） */
+function questionRows(db, ids) {
+  if (!ids.length) return []
+  const raw = all(
+    db,
+    `SELECT q.id, q.blocks_json, q.qtype_code, q.diff_code, q.source_kind, q.source_raw,
+            q.mother_qid, q.variant_op, q.status, q.created_at,
+            ${P('$.教材版本')} AS textbook, ${P('$.版本使用级')} AS use_level,
+            ${P('$.版本置信')} AS version_conf,
+            ${SRC_BOOK_SQL} AS src_book, ${SRC_BOOK_FROM_SQL} AS src_book_from
+     FROM question q WHERE q.id IN (${marks(ids.length)})`,
+    ...ids,
+  )
+  const byId = new Map(raw.map((r) => [r.id, r]))
+  const dict = dictMap(db)
+  const kpByQ = {}
+  const varByQ = {}
+  const tkByQ = {}
+  for (const r of all(
+    db,
+    `SELECT qk.question_id, qk.kp_id, qk.is_primary, kp.name
+     FROM question_kp qk JOIN kp ON kp.id = qk.kp_id
+     WHERE qk.question_id IN (${marks(ids.length)})
+     ORDER BY qk.is_primary DESC, kp.id`,
+    ...ids,
+  )) {
+    ;(kpByQ[r.question_id] ||= []).push({ id: r.kp_id, name: r.name, is_primary: !!r.is_primary })
+  }
+  for (const r of all(
+    db,
+    `SELECT mother_qid, COUNT(*) AS c FROM question
+     WHERE mother_qid IN (${marks(ids.length)}) GROUP BY mother_qid`,
+    ...ids,
+  )) {
+    varByQ[r.mother_qid] = r.c
+  }
+  // 🔴 审核工单挂在题上（review_ticket.ref = question.id）：待处理的必须在列表里看得见，
+  //    否则「先审后上架」这条闸就只活在库里，页面上是隐形的。
+  for (const r of all(
+    db,
+    `SELECT id, kind, ref, status, note, created_at FROM review_ticket
+     WHERE ref IN (${marks(ids.length)}) ORDER BY status, id`,
+    ...ids,
+  )) {
+    ;(tkByQ[r.ref] ||= []).push({
+      id: String(r.id),
+      kind: r.kind,
+      status: r.status,
+      note: r.note,
+      created_at: r.created_at,
+    })
+  }
+
+  return ids
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map((r) => {
+      const tickets = tkByQ[r.id] || []
+      return {
+        id: r.id,
+        stem: stemBrief(r.blocks_json),
+        qtype_code: r.qtype_code,
+        qtype_label: r.qtype_code ? dict[r.qtype_code] || r.qtype_code : null,
+        diff_code: r.diff_code,
+        diff_label: r.diff_code ? dict[r.diff_code] || r.diff_code : null,
+        source_kind: r.source_kind,
+        source_label: r.source_kind ? dict[r.source_kind] || r.source_kind : null,
+        source_raw: r.source_raw,
+        kps: kpByQ[r.id] || [],
+        status: r.status,
+        // 血缘有无 = 有母题 或 有变体（SSOT 就是 question.mother_qid 这一列，不查平行 trace 表）
+        has_mother: !!r.mother_qid,
+        variant_count: varByQ[r.id] || 0,
+        has_lineage: !!r.mother_qid || (varByQ[r.id] || 0) > 0,
+        variant_op: r.variant_op,
+        created_at: r.created_at,
+        // ── PRD-007 来源三维（prov 现取；来源册是现推的，推法随行带出来） ──
+        textbook: r.textbook ?? null,
+        use_level: r.use_level ?? null,
+        version_conf: r.version_conf ?? null,
+        src_book: r.src_book ?? null,
+        src_book_from: r.src_book_from ?? null,
+        tickets,
+        ticket_open: tickets.filter((t) => t.status === '待处理').length,
+      }
+    })
+}
+
+/** 来源三维的候选值（🔴 全库口径，不随当前筛选缩水——下拉里少一个值＝那批题被藏了） */
+function questionFacets(db) {
+  const facet = (expr) =>
+    all(
+      db,
+      `SELECT ${expr} AS v, COUNT(*) AS c FROM question q GROUP BY v ORDER BY c DESC, v`,
+    ).map((r) => ({ value: r.v ?? null, label: r.v ?? '未标', count: r.c }))
+  return {
+    textbook: facet(P('$.教材版本')),
+    use_level: facet(P('$.版本使用级')),
+    src_book: facet(SRC_BOOK_SQL),
+    status: all(db, 'SELECT status AS v, COUNT(*) AS c FROM question GROUP BY v ORDER BY c DESC').map((r) => ({
+      value: r.v,
+      label: r.v,
+      count: r.c,
+    })),
+    ticket_open_total: one(
+      db,
+      `SELECT COUNT(DISTINCT rt.ref) AS c FROM review_ticket rt
+       WHERE rt.status = '待处理' AND EXISTS (SELECT 1 FROM question q WHERE q.id = rt.ref)`,
+    ).c,
+    question_total: one(db, 'SELECT COUNT(*) AS c FROM question').c,
+  }
+}
+
+/**
+ * 语意排序（D-20 第③层）——口径正本 = 工具箱/检索/embed_tool.rank：
+ *   查询文本 → :4315 常驻 serve 算向量 → 与 question_vec 同模型向量点积（已 L2 归一化 ⇒ 点积=余弦）→ 降序。
+ * 🔴 三条：
+ *   ① serve 挂了 = **明确报错**（页面据此把搜索框收起来），绝不静默退回「按时间排」冒充语意命中；
+ *   ② 候选里没算过向量的题**如实计数**（missing），不假装它们不存在；
+ *   ③ 只读 question_vec，一个字节都不写（补向量走 工具箱/检索/embed_tool.py build）。
+ */
+async function semanticRank(db, text, candidateIds) {
+  let res
+  try {
+    res = await fetch(`http://127.0.0.1:${EMBED_PORT}/embed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(15000),
+    })
+  } catch (e) {
+    throw new Error(`语意 serve :${EMBED_PORT} 连不上（起：python 工具箱\\启动台.py）：${e.message}`)
+  }
+  const out = await res.json().catch(() => null)
+  if (!res.ok || !out?.ok || !Array.isArray(out.vecs_b64) || !out.vecs_b64.length) {
+    throw new Error(`语意 serve 回话异常（HTTP ${res.status}）：${out?.error ?? '无 vecs_b64'}`)
+  }
+  const qbuf = Buffer.from(out.vecs_b64[0], 'base64')
+  const qv = new Float32Array(qbuf.buffer, qbuf.byteOffset, qbuf.byteLength / 4)
+  const rows = all(db, 'SELECT question_id, dim, vec FROM question_vec WHERE model = ?', out.model)
+  const cand = new Set(candidateIds)
+  const hits = []
+  for (const r of rows) {
+    if (!cand.has(r.question_id)) continue
+    const b = Buffer.from(r.vec)
+    const v = new Float32Array(b.buffer, b.byteOffset, b.byteLength / 4)
+    if (v.length !== qv.length) {
+      // 维度不齐＝换过模型没重算，宁可整条报错也不拿半份向量排名次
+      throw new Error(`库内向量 ${v.length} 维 ≠ 查询 ${qv.length} 维（换过模型就跑 embed_tool.py build --force）`)
+    }
+    let s = 0
+    for (let i = 0; i < v.length; i += 1) s += v[i] * qv[i]
+    hits.push({ id: r.question_id, score: s })
+  }
+  hits.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+  return {
+    hits,
+    info: {
+      model: out.model,
+      dim: out.dim,
+      candidates: candidateIds.length,
+      vectored: hits.length,
+      missing: candidateIds.length - hits.length, // 🔴 没算向量的题照实报
+      serve_ms: out.ms ?? null,
+    },
+  }
+}
+
+/** 题表端点：无 like 走时间序分页；有 like 走语意排序（异步，返回 Promise） */
+function epQuestions(db, q) {
+  const page = Math.max(1, Number(q.get('page') || 1))
+  const size = Math.min(200, Math.max(1, Number(q.get('size') || 20)))
+  const off = (page - 1) * size
+  const { sql, args, meta } = questionWhere(db, q)
+  const like = (q.get('like') || '').trim()
+
+  if (!like) {
+    const total = one(db, `SELECT COUNT(*) AS c FROM question q${sql}`, ...args).c
+    const ids = all(
+      db,
+      `SELECT q.id FROM question q${sql} ORDER BY q.created_at DESC, q.id LIMIT ? OFFSET ?`,
+      ...args,
+      size,
+      off,
+    ).map((r) => r.id)
+    return { total, page, size, ...meta, semantic: null, facets: questionFacets(db), rows: questionRows(db, ids) }
+  }
+
+  // 🔴 ①②层先 SQL 过滤，③层只负责在候选里排序（与 query_core 同口径，别在这儿另发明一套）
+  const candIds = all(db, `SELECT q.id FROM question q${sql}`, ...args).map((r) => r.id)
+  return semanticRank(db, like, candIds).then(({ hits, info }) => {
+    const ids = hits.slice(off, off + size).map((h) => h.id)
+    const scoreOf = new Map(hits.map((h) => [h.id, h.score]))
+    const rows = questionRows(db, ids).map((r) => ({ ...r, score: scoreOf.get(r.id) ?? null }))
+    return {
+      total: hits.length,
+      page,
+      size,
+      ...meta,
+      semantic: { ...info, query: like, sql_candidates: candIds.length },
+      facets: questionFacets(db),
+      rows,
+    }
+  })
 }
 
 function epQuestionDetail(db, id) {
@@ -894,6 +1125,403 @@ function epArtifactMembers(db, q) {
   }
 }
 
+// ── PRD-007 维护域端点（KG / 考察模型 / 判据 / 模版）─────────────────────
+
+/**
+ * `kp_ids_json` → 考点引用表。🔴 三种坏法各有各的说法，绝不糊成一种：
+ *   ① 不是合法 JSON 数组 ⇒ parse_error 原样端出去；
+ *   ② 空数组 ⇒ 调用方标「未挂考点（溯源断点）」；
+ *   ③ 指向库里不存在的 kp ⇒ missing=true（断链），页面渲成灰色不可点。
+ */
+function kpRefs(db, rawJson) {
+  if (rawJson === null || rawJson === undefined || rawJson === '') return { refs: [], parse_error: null }
+  let arr
+  try {
+    arr = JSON.parse(rawJson)
+  } catch (e) {
+    return { refs: [], parse_error: String(e.message) }
+  }
+  if (!Array.isArray(arr)) return { refs: [], parse_error: 'kp_ids_json 不是数组' }
+  return {
+    parse_error: null,
+    refs: arr.map((raw) => {
+      const id = String(raw)
+      const r = one(db, 'SELECT id, name, level, status FROM kp WHERE id = ?', id)
+      return r
+        ? { id: r.id, name: r.name, level: r.level, status: r.status, missing: false }
+        : { id, name: null, level: null, status: null, missing: true }
+    }),
+  }
+}
+
+/** 挂在某片叶上的模型/题型（kp_ids_json 是 JSON 数组文本，按 `"<id>"` 子串命中即可） */
+function modelsOfKp(db, table, kpId) {
+  return all(db, `SELECT * FROM ${table} WHERE kp_ids_json LIKE ? ${LIKE_ESC}`, `%"${likeEsc(kpId)}"%`)
+}
+
+/**
+ * 别名层 kp_alias —— 产线词/讲义名/老区名 → 叶子的翻译表（老区 resolve 命中率 2%~29% 的解药）。
+ * 🔴 两种坏账必须看得见：**一词多挂**（同一别名指向两片以上叶 ⇒ resolve 二义）、
+ *   **别名断链**（alias 指向不存在的 kp）。数字全现算，不手写。
+ */
+function epKgAliases(db, q) {
+  const where = []
+  const args = []
+  const kpId = q.get('kp_id')
+  if (kpId) {
+    where.push('a.kp_id = ?')
+    args.push(kpId)
+  }
+  const kind = q.get('kind')
+  if (kind) {
+    where.push('a.alias_kind = ?')
+    args.push(kind)
+  }
+  const kw = (q.get('q') || '').trim()
+  if (kw) {
+    where.push(`(a.alias LIKE ? ${LIKE_ESC} OR kp.name LIKE ? ${LIKE_ESC})`)
+    const pat = `%${likeEsc(kw)}%`
+    args.push(pat, pat)
+  }
+  const sql = where.length ? ` WHERE ${where.join(' AND ')}` : ''
+  const rows = all(
+    db,
+    `SELECT a.kp_id, a.alias, a.alias_kind, kp.name AS kp_name, kp.level AS kp_level, kp.status AS kp_status
+     FROM kp_alias a LEFT JOIN kp ON kp.id = a.kp_id${sql}
+     ORDER BY a.alias_kind, kp.name, a.alias`,
+    ...args,
+  )
+  const ambiguous = all(
+    db,
+    'SELECT alias, COUNT(DISTINCT kp_id) AS c FROM kp_alias GROUP BY alias HAVING c > 1 ORDER BY c DESC, alias',
+  )
+  return {
+    total: one(db, 'SELECT COUNT(*) AS c FROM kp_alias').c,
+    shown: rows.length,
+    covered_kp: one(db, 'SELECT COUNT(DISTINCT kp_id) AS c FROM kp_alias').c,
+    kind_stat: all(
+      db,
+      'SELECT alias_kind, COUNT(*) AS c FROM kp_alias GROUP BY alias_kind ORDER BY c DESC',
+    ).map((r) => ({ kind: r.alias_kind ?? '未标来源', count: r.c })),
+    ambiguous: ambiguous.map((r) => ({ alias: r.alias, kp_count: r.c })), // 空数组=闸绿
+    broken_total: rows.filter((r) => r.kp_name == null).length,
+    filters: { kp_id: kpId || null, kind: kind || null, q: kw || null },
+    rows: rows.map((r) => ({
+      kp_id: r.kp_id,
+      alias: r.alias,
+      alias_kind: r.alias_kind ?? null,
+      kp_name: r.kp_name ?? null,
+      kp_level: r.kp_level ?? null,
+      kp_status: r.kp_status ?? null,
+      missing: r.kp_name == null, // 🔴 别名挂了个不存在的叶＝断链
+    })),
+  }
+}
+
+/**
+ * 单个 kp 节点详情 = **聚合落点**（叶：档案+家当；枝：下辖规模+零挂载缺口）。
+ * 🔴 建叶/改树/改归属这类结构动作**不在页面**（走 KG维护 skill 的 kg_tool.py），本端点纯读。
+ */
+function epKpDetail(db, id) {
+  const k = one(db, 'SELECT * FROM kp WHERE id = ?', id)
+  if (!k) return null
+  const dict = dictMap(db)
+  const kids = all(db, 'SELECT id, name, level, status, ord FROM kp WHERE parent_id = ? ORDER BY ord, id', id)
+  const subIds = subtreeIds(db, id)
+  const leafIds = subIds.filter((x) => !one(db, 'SELECT 1 AS y FROM kp WHERE parent_id = ? LIMIT 1', x))
+  const qCountOf = (kpId) =>
+    one(db, 'SELECT COUNT(DISTINCT question_id) AS c FROM question_kp WHERE kp_id = ?', kpId).c
+  const qTotal = one(
+    db,
+    `SELECT COUNT(DISTINCT question_id) AS c FROM question_kp WHERE kp_id IN (${marks(subIds.length)})`,
+    ...subIds,
+  ).c
+  const leaves = leafIds.map((lid) => {
+    const r = one(db, 'SELECT id, name, level, status FROM kp WHERE id = ?', lid)
+    return { ...r, q_count: qCountOf(lid) }
+  })
+
+  const em = modelsOfKp(db, 'exam_model', id).map((m) => ({
+    id: m.id,
+    name: m.name,
+    dsl_ref: m.dsl_ref,
+    status: m.status,
+  }))
+  const sm = modelsOfKp(db, 'solution_model', id).map((m) => ({
+    id: m.id,
+    name: m.name,
+    tier: m.tier,
+    freq: m.freq,
+    status: m.status,
+  }))
+  const pat = modelsOfKp(db, 'question_pattern', id).map((m) => ({ id: m.id, name: m.name, status: m.status }))
+
+  return {
+    id: k.id,
+    name: k.name,
+    level: k.level,
+    ord: k.ord,
+    status: k.status,
+    note: k.note,
+    // 🔴 对齐-003 起「这类题长什么样」归 kp 自己这四列（题型实体层停用），页面必须显示它们
+    emphasis: k.emphasis ?? null,
+    freq: k.freq ?? null,
+    diff_code: k.diff_code ?? null,
+    diff_label: k.diff_code ? dict[k.diff_code] || k.diff_code : null,
+    desc: k.desc ?? null,
+    path: kpPath(db, id),
+    is_leaf: kids.length === 0,
+    children: kids.map((c) => ({ ...c, q_count: qCountOf(c.id) })),
+    leaf_total: leaves.length,
+    zero_mount_leaves: leaves.filter((l) => l.q_count === 0),
+    q_count: qCountOf(id),
+    q_total: qTotal,
+    aliases: all(db, 'SELECT alias, alias_kind FROM kp_alias WHERE kp_id = ? ORDER BY alias_kind, alias', id).map(
+      (a) => ({ alias: a.alias, alias_kind: a.alias_kind ?? null }),
+    ),
+    exam_models: em,
+    solution_models: sm,
+    patterns: pat,
+    questions: all(
+      db,
+      `SELECT q.id, q.blocks_json, q.status, q.qtype_code, q.diff_code, qk.is_primary
+       FROM question_kp qk JOIN question q ON q.id = qk.question_id
+       WHERE qk.kp_id = ? ORDER BY qk.is_primary DESC, q.created_at DESC LIMIT 12`,
+      id,
+    ).map((r) => ({
+      id: r.id,
+      stem: stemBrief(r.blocks_json, 70),
+      status: r.status,
+      is_primary: !!r.is_primary,
+      qtype_label: r.qtype_code ? dict[r.qtype_code] || r.qtype_code : null,
+      diff_label: r.diff_code ? dict[r.diff_code] || r.diff_code : null,
+    })),
+  }
+}
+
+/**
+ * 「一类题」的三张脸：怎么造（exam_model）/ 怎么解（solution_model）/ 长什么样（question_pattern）。
+ * 🔴 第三张脸 **对齐-003 起停用**（数据结构 §2.1④ 原文：不设与考点平行的题型实体层，
+ *   "长什么样"归 kp.desc）——本端点如实回 disabled + 零行，页面必须写「停用」，
+ *   **不许拿别的东西把这张空表装满**（装满=页面在编事实）。
+ */
+function epModels(db) {
+  const dict = dictMap(db)
+  // 出题数：prov.model_id 现算（血缘 SSOT 在题上，模型表不落冗余计数列）
+  const emCount = {}
+  for (const r of all(
+    db,
+    `SELECT ${P('$.model_id')} AS m, COUNT(*) AS c FROM question q WHERE ${P('$.model_id')} IS NOT NULL GROUP BY m`,
+  )) {
+    emCount[r.m] = r.c
+  }
+  const withKp = (row) => {
+    const { refs, parse_error } = kpRefs(db, row.kp_ids_json)
+    return { kps: refs, kp_parse_error: parse_error, kp_broken: refs.filter((r) => r.missing).length }
+  }
+
+  const exam = all(db, 'SELECT * FROM exam_model ORDER BY status, id').map((m) => ({
+    id: m.id,
+    name: m.name,
+    ...withKp(m),
+    dsl_ref: m.dsl_ref ?? null,
+    params: m.params_json ? parseJson(m.params_json) : null,
+    params_raw: m.params_json ?? null,
+    note: m.note ?? null,
+    status: m.status,
+    question_count: emCount[m.id] ?? 0,
+  }))
+  const solution = all(db, 'SELECT * FROM solution_model ORDER BY status, id').map((m) => ({
+    id: m.id,
+    name: m.name,
+    ...withKp(m),
+    trigger_feature: m.trigger_feature,
+    action_conclusion: m.action_conclusion,
+    tier: m.tier,
+    freq: m.freq,
+    status: m.status,
+  }))
+  const pattern = all(db, 'SELECT * FROM question_pattern ORDER BY id').map((m) => ({
+    id: m.id,
+    name: m.name,
+    ...withKp(m),
+    desc: m.desc ?? null,
+    emphasis: m.emphasis ?? null,
+    freq: m.freq ?? null,
+    diff_code: m.diff_code ?? null,
+    diff_label: m.diff_code ? dict[m.diff_code] || m.diff_code : null,
+    status: m.status,
+  }))
+
+  return {
+    exam: {
+      total: exam.length,
+      in_use: exam.filter((m) => m.status === '在用').length,
+      question_total: exam.reduce((s, m) => s + m.question_count, 0),
+      rows: exam,
+    },
+    solution: {
+      total: solution.length,
+      in_use: solution.filter((m) => m.status === '在用').length,
+      rows: solution,
+    },
+    pattern: {
+      total: pattern.length,
+      disabled: true,
+      disabled_note:
+        '停用（对齐-003，2026-08-19 用户拍板）：不设与考点平行的题型实体层。'
+        + '「这类题长什么样」归 kp.desc（考点自己的考法面），「怎么造」仍归 exam_model。'
+        + 'question.pattern_id 同步停用（列保留、不写值、不查）；误立的 173 行已清空，'
+        + '锚定关系留档 工具箱/kg/题型锚定映射.json。',
+      // 🔴 pattern_id 实际写了值的题数：停用口径说「零写入」，这里现算给出证据（非 0 就是违例）
+      question_with_pattern_id: one(db, 'SELECT COUNT(*) AS c FROM question WHERE pattern_id IS NOT NULL').c,
+      kp_desc_total: one(db, "SELECT COUNT(*) AS c FROM kp WHERE desc IS NOT NULL AND desc <> ''").c,
+      rows: pattern,
+    },
+    trace_gap: {
+      exam_no_kp: exam.filter((m) => m.kps.length === 0).length,
+      exam_broken_kp: exam.filter((m) => m.kp_broken > 0).length,
+      solution_no_kp: solution.filter((m) => m.kps.length === 0).length,
+      solution_broken_kp: solution.filter((m) => m.kp_broken > 0).length,
+    },
+  }
+}
+
+/**
+ * 判据沉淀 criterion —— 每条来自一次真实事故或一次拍板，是 agent 开工时按线全量注入的依据。
+ * 🔴 废止不删除：留档并带**替代链**（superseded_by），且现行/废止分开数——
+ *   废止的混进现行＝把已经被推翻的口径又注回 agent，是最坏的一种错。
+ */
+function epCriteria(db, q) {
+  const where = []
+  const args = []
+  const line = q.get('line')
+  if (line) {
+    where.push('c.line = ?')
+    args.push(line)
+  }
+  const status = q.get('status')
+  if (status) {
+    where.push('c.status = ?')
+    args.push(status)
+  }
+  const kw = (q.get('q') || '').trim()
+  if (kw) {
+    where.push(
+      `(c.id LIKE ? ${LIKE_ESC} OR c.scene LIKE ? ${LIKE_ESC} OR c.rule LIKE ? ${LIKE_ESC}`
+      + ` OR c.why LIKE ? ${LIKE_ESC} OR c.source_ref LIKE ? ${LIKE_ESC})`,
+    )
+    const pat = `%${likeEsc(kw)}%`
+    args.push(pat, pat, pat, pat, pat)
+  }
+  const sql = where.length ? ` WHERE ${where.join(' AND ')}` : ''
+  const rows = all(
+    db,
+    `SELECT c.*, s.scene AS sup_scene, s.status AS sup_status, s.line AS sup_line
+     FROM criterion c LEFT JOIN criterion s ON s.id = c.superseded_by${sql}
+     ORDER BY c.line, c.id`,
+    ...args,
+  )
+  // 分组统计走全表（不随筛选变）：页签上的数必须是「这条线一共几条」，不是「当前筛出几条」
+  const lineStat = all(
+    db,
+    `SELECT line,
+            COUNT(*) AS total,
+            SUM(CASE WHEN status = '现行' THEN 1 ELSE 0 END) AS live,
+            SUM(CASE WHEN status = '废止' THEN 1 ELSE 0 END) AS dead
+     FROM criterion GROUP BY line ORDER BY total DESC`,
+  )
+  return {
+    total: one(db, 'SELECT COUNT(*) AS c FROM criterion').c,
+    live_total: one(db, "SELECT COUNT(*) AS c FROM criterion WHERE status = '现行'").c,
+    dead_total: one(db, "SELECT COUNT(*) AS c FROM criterion WHERE status = '废止'").c,
+    shown: rows.length,
+    // 🔴 CHECK 里有四条线（录入/批改/出题/渲染），库里现在只有几条线有货——照实报，别把没有的线渲成 0 条假页签
+    line_stat: lineStat.map((r) => ({ line: r.line, total: r.total, live: r.live, dead: r.dead })),
+    filters: { line: line || null, status: status || null, q: kw || null },
+    rows: rows.map((r) => ({
+      id: r.id,
+      line: r.line,
+      scene: r.scene,
+      rule: r.rule,
+      why: r.why ?? null,
+      source_ref: r.source_ref ?? null,
+      status: r.status,
+      superseded_by: r.superseded_by ?? null,
+      // 替代链：指过去那条的现状（指了个不存在的 id ＝ 断链，如实标）
+      superseded_by_info: r.superseded_by
+        ? r.sup_scene != null
+          ? { id: r.superseded_by, scene: r.sup_scene, line: r.sup_line, status: r.sup_status, missing: false }
+          : { id: r.superseded_by, scene: null, line: null, status: null, missing: true }
+        : null,
+      created_at: r.created_at ?? null,
+    })),
+  }
+}
+
+/**
+ * 模版库 template —— 🔴 渲染永远在 agent 本地跑（HTML → Chrome → PDF），系统只登记模版与样张。
+ * 本端点纯读：不新建、不改参数、不生成 PDF。停用的模版**不删**（发出去的册子还是老版式）。
+ */
+function epTemplates(db, q) {
+  const where = []
+  const args = []
+  const status = q.get('status')
+  if (status) {
+    where.push('t.status = ?')
+    args.push(status)
+  }
+  const sql = where.length ? ` WHERE ${where.join(' AND ')}` : ''
+  const rows = all(
+    db,
+    `SELECT t.*, a.rel_path AS sample_rel_path, a.kind AS sample_kind,
+            (SELECT COUNT(*) FROM artifact ar WHERE ar.template_id = t.id) AS artifact_count
+     FROM template t LEFT JOIN asset a ON a.hash = t.sample_asset${sql}
+     ORDER BY t.status, t.id`,
+    ...args,
+  )
+  return {
+    total: one(db, 'SELECT COUNT(*) AS c FROM template').c,
+    in_use: one(db, "SELECT COUNT(*) AS c FROM template WHERE status = '在用'").c,
+    with_sample: one(db, 'SELECT COUNT(*) AS c FROM template WHERE sample_asset IS NOT NULL').c,
+    shown: rows.length,
+    filters: { status: status || null },
+    rows: rows.map((t) => ({
+      id: t.id,
+      name: t.name ?? null,
+      purpose: t.purpose ?? null,
+      book_kinds: t.book_kinds ?? null,
+      params: t.params_json ? parseJson(t.params_json) : null,
+      params_raw: t.params_json ?? null,
+      pitfalls: t.pitfalls ?? null,
+      version: t.version ?? null,
+      status: t.status,
+      sample_asset: t.sample_asset ?? null,
+      // 样张只给相对路径（展示台不做图床）；没登记就是没登记，不拿占位图冒充
+      sample_rel_path: t.sample_rel_path ?? null,
+      registered_by: t.registered_by ?? null,
+      updated_at: t.updated_at ?? null,
+      artifact_count: t.artifact_count,
+    })),
+  }
+}
+
+/** 语意 serve 探活 —— 页面据此决定显不显 --like 搜索框（挂了就收起来，优雅降级不报红） */
+async function epSemanticHealth() {
+  try {
+    const res = await fetch(`http://127.0.0.1:${EMBED_PORT}/health`, { signal: AbortSignal.timeout(2500) })
+    const body = await res.json()
+    return { ok: !!body?.ok, port: EMBED_PORT, health: body }
+  } catch (e) {
+    return {
+      ok: false,
+      port: EMBED_PORT,
+      error: String(e.message),
+      hint: '起常驻：python 工具箱\\启动台.py（语意 serve 是加速器不是依赖，它挂了只影响 --like 一处）',
+    }
+  }
+}
+
 // ── 🔴 全站唯一写端点 ────────────────────────────────────────────────────
 /**
  * 改一本资料的**售卖态 sale_state**（`在售` / `待整理` / `停售` / 清空）。
@@ -1007,6 +1635,13 @@ function epPaperDetail(db, id) {
 const ROUTES = [
   { re: /^\/api\/kb\/stats$/, run: (db) => epStats(db) },
   { re: /^\/api\/kb\/kg\/tree$/, run: (db) => buildTree(db) },
+  { re: /^\/api\/kb\/kg\/aliases$/, run: (db, _m, q) => epKgAliases(db, q) },
+  { re: /^\/api\/kb\/kp\/(.+)$/, run: (db, m) => epKpDetail(db, decodeURIComponent(m[1])) },
+  { re: /^\/api\/kb\/models$/, run: (db) => epModels(db) },
+  { re: /^\/api\/kb\/criteria$/, run: (db, _m, q) => epCriteria(db, q) },
+  { re: /^\/api\/kb\/templates$/, run: (db, _m, q) => epTemplates(db, q) },
+  // 🔴 语意 serve 探活：不碰库（唯一一条不用 db 的读端点），页面据它决定显不显 --like 框
+  { re: /^\/api\/kb\/semantic\/health$/, run: () => epSemanticHealth() },
   { re: /^\/api\/kb\/questions$/, run: (db, _m, q) => epQuestions(db, q) },
   { re: /^\/api\/kb\/questions\/(.+)$/, run: (db, m) => epQuestionDetail(db, decodeURIComponent(m[1])) },
   { re: /^\/api\/kb\/artifacts$/, run: (db) => epArtifacts(db) },
@@ -1087,9 +1722,18 @@ const server = createServer((req, res) => {
       endpoints: [
         'GET /api/kb/stats',
         'GET /api/kb/kg/tree',
-        'GET /api/kb/questions?kp=&status=&source_kind=&qtype=&difficulty=&tag=&unused=&page=&size=' +
+        'GET /api/kb/kg/aliases?kp_id=&kind=&q=（别名层 + 一词多挂/断链告警）',
+        'GET /api/kb/kp/:id（考点节点详情＝聚合落点：档案/别名/挂靠模型/零挂载缺口）',
+        'GET /api/kb/models（三张脸：exam_model 怎么造 / solution_model 怎么解 / question_pattern 已停用）',
+        'GET /api/kb/criteria?line=&status=&q=（判据沉淀，废止带替代链）',
+        'GET /api/kb/templates?status=（模版库，params/pitfalls 展开）',
+        'GET /api/kb/semantic/health（语意 serve :4315 探活，不碰库）',
+        'GET /api/kb/questions?kp=&status=&source_kind=&qtype=&difficulty=&tag=&unused=' +
+          '&textbook=&use_level=&src_book=&ticket=&like=&page=&size=' +
           '（qtype/difficulty/tag 可重复给：同名多值 qtype/difficulty=OR、tag=AND；' +
-          'tag 写「域:名」或「名」；unused=1 未进过卷 / unused=0 进过卷）',
+          'tag 写「域:名」或「名」；unused=1 未进过卷 / unused=0 进过卷；' +
+          'textbook/use_level/src_book 可重复给=OR，写「未标」查没记的；ticket=1 只看挂着待处理工单的；' +
+          'like=语意搜索，先 SQL 过滤再按余弦排序，serve 挂了明确报错不静默降级）',
         'GET /api/kb/questions/:id',
         'GET /api/kb/artifacts',
         'GET /api/kb/artifacts/:id（含 sale_state / link / 解析出的 pan_code / 合刊 members）',
@@ -1102,20 +1746,39 @@ const server = createServer((req, res) => {
     })
   }
   let db
-  try {
-    db = openRo()
-    const data = hit.r.run(db, hit.m, url.searchParams)
-    if (data === null) return send(res, 404, { error: '查无此条', path: url.pathname })
-    return send(res, 200, data)
-  } catch (e) {
-    console.error(`[kb-read-api] ${url.pathname} 出错：${e.message}`)
-    return send(res, 500, { error: String(e.message) })
-  } finally {
+  const shut = () => {
     try {
       db?.close()
     } catch {
       /* 关不上就算了，进程退出会回收 */
     }
+  }
+  try {
+    db = openRo()
+    const data = hit.r.run(db, hit.m, url.searchParams)
+    // 🔴 异步端点（语意排序要等 :4315 回话、探活要等 HTTP）：句柄由 then 链负责关，
+    //    绝不能走 finally 提前关——提前关会让还没跑完的查询拿到已关闭的库。
+    if (data && typeof data.then === 'function') {
+      return data.then(
+        (d) => {
+          shut()
+          if (d === null) return send(res, 404, { error: '查无此条', path: url.pathname })
+          return send(res, 200, d)
+        },
+        (e) => {
+          shut()
+          console.error(`[kb-read-api] ${url.pathname} 出错：${e.message}`)
+          return send(res, 500, { error: String(e.message) })
+        },
+      )
+    }
+    shut()
+    if (data === null) return send(res, 404, { error: '查无此条', path: url.pathname })
+    return send(res, 200, data)
+  } catch (e) {
+    shut()
+    console.error(`[kb-read-api] ${url.pathname} 出错：${e.message}`)
+    return send(res, 500, { error: String(e.message) })
   }
 })
 
@@ -1125,7 +1788,7 @@ if (!existsSync(DB_PATH)) {
 }
 // 🔴 起服务前的自检闸①：全站写端点必须恰好 1 条，且只能是 sale-state；读端点数必须与
 // 文件头「端点账」对得上。靠闸不靠注释——有人偷偷 push 第二条写口 / 加个口不改账，服务直接起不来。
-const EP_READ = 9 // 原 7 读 + PRD-003 的 materials、artifact-members
+const EP_READ = 15 // 原 7 读 + PRD-003 的 2 读 + PRD-007 的 6 读（kg/aliases、kp/:id、models、criteria、templates、semantic/health）
 const EP_WRITE = 1 // 全站唯一写口 sale-state
 if (WRITE_ROUTES.length !== EP_WRITE || WRITE_ROUTES[0].path !== '/api/kb/sale-state') {
   console.error(`🔴 写端点白名单被改了（现有 ${WRITE_ROUTES.length} 条）：页面只读原则=全站唯一写端点 sale-state`)

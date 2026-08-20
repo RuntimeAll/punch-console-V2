@@ -92,6 +92,200 @@ export interface KbTree {
   unbuilt_total: number
 }
 
+// ── /api/kb/kg/aliases ──────────────────────────────────────────────────
+export interface KbAliasRow {
+  kp_id: string
+  alias: string
+  alias_kind: string | null
+  kp_name: string | null
+  kp_level: string | null
+  kp_status: string | null
+  /** 🔴 别名挂了个不存在的叶＝断链 */
+  missing: boolean
+}
+
+export interface KbAliases {
+  total: number
+  shown: number
+  covered_kp: number
+  kind_stat: { kind: string; count: number }[]
+  /** 一词多挂：同一别名指向两片以上叶 ⇒ resolve 二义（空数组=闸绿） */
+  ambiguous: { alias: string; kp_count: number }[]
+  broken_total: number
+  filters: { kp_id: string | null; kind: string | null; q: string | null }
+  rows: KbAliasRow[]
+}
+
+// ── /api/kb/kp/:id ──────────────────────────────────────────────────────
+export interface KbKpDetail {
+  id: string
+  name: string
+  level: string
+  ord: number | null
+  status: string
+  note: string | null
+  /** 🔴 对齐-003 起「这类题长什么样」归 kp 自己这四列（题型实体层停用） */
+  emphasis: string | null
+  freq: string | null
+  diff_code: string | null
+  diff_label: string | null
+  desc: string | null
+  path: { id: string; name: string; level: string }[]
+  is_leaf: boolean
+  children: { id: string; name: string; level: string; status: string; q_count: number }[]
+  leaf_total: number
+  zero_mount_leaves: { id: string; name: string; level: string; status: string; q_count: number }[]
+  q_count: number
+  q_total: number
+  aliases: { alias: string; alias_kind: string | null }[]
+  exam_models: { id: string; name: string; dsl_ref: string | null; status: string }[]
+  solution_models: { id: string; name: string; tier: number | null; freq: number | null; status: string }[]
+  patterns: { id: string; name: string; status: string }[]
+  questions: {
+    id: string
+    stem: string
+    status: string
+    is_primary: boolean
+    qtype_label: string | null
+    diff_label: string | null
+  }[]
+}
+
+// ── /api/kb/models ──────────────────────────────────────────────────────
+/** 模型挂的考点引用；missing=true 表示 kp_ids_json 指了个库里没有的 id（断链） */
+export interface KbKpRef {
+  id: string
+  name: string | null
+  level: string | null
+  status: string | null
+  missing: boolean
+}
+
+export interface KbExamModel {
+  id: string
+  name: string
+  kps: KbKpRef[]
+  kp_parse_error: string | null
+  kp_broken: number
+  dsl_ref: string | null
+  params: Record<string, unknown> | null
+  params_raw: string | null
+  note: string | null
+  status: string
+  question_count: number
+}
+
+export interface KbSolutionModel {
+  id: string
+  name: string
+  kps: KbKpRef[]
+  kp_parse_error: string | null
+  kp_broken: number
+  trigger_feature: string
+  action_conclusion: string
+  tier: number | null
+  freq: number | null
+  status: string
+}
+
+export interface KbPatternRow {
+  id: string
+  name: string
+  kps: KbKpRef[]
+  desc: string | null
+  emphasis: string | null
+  freq: string | null
+  diff_code: string | null
+  diff_label: string | null
+  status: string
+}
+
+export interface KbModels {
+  exam: { total: number; in_use: number; question_total: number; rows: KbExamModel[] }
+  solution: { total: number; in_use: number; rows: KbSolutionModel[] }
+  /** 🔴 对齐-003 起停用：如实回 disabled + 零行，页面写「停用」，不许拿别的东西把空表装满 */
+  pattern: {
+    total: number
+    disabled: boolean
+    disabled_note: string
+    question_with_pattern_id: number
+    kp_desc_total: number
+    rows: KbPatternRow[]
+  }
+  trace_gap: {
+    exam_no_kp: number
+    exam_broken_kp: number
+    solution_no_kp: number
+    solution_broken_kp: number
+  }
+}
+
+// ── /api/kb/criteria ────────────────────────────────────────────────────
+export interface KbCriterion {
+  id: string
+  line: string
+  scene: string
+  rule: string
+  why: string | null
+  source_ref: string | null
+  status: '现行' | '废止'
+  superseded_by: string | null
+  superseded_by_info: {
+    id: string
+    scene: string | null
+    line: string | null
+    status: string | null
+    missing: boolean
+  } | null
+  created_at: string | null
+}
+
+export interface KbCriteria {
+  total: number
+  live_total: number
+  dead_total: number
+  shown: number
+  line_stat: { line: string; total: number; live: number; dead: number }[]
+  filters: { line: string | null; status: string | null; q: string | null }
+  rows: KbCriterion[]
+}
+
+// ── /api/kb/templates ───────────────────────────────────────────────────
+export interface KbTemplate {
+  id: string
+  name: string | null
+  purpose: string | null
+  book_kinds: string | null
+  params: Record<string, unknown> | null
+  params_raw: string | null
+  pitfalls: string | null
+  version: string | null
+  status: '在用' | '停用'
+  sample_asset: string | null
+  sample_rel_path: string | null
+  registered_by: string | null
+  updated_at: string | null
+  artifact_count: number
+}
+
+export interface KbTemplates {
+  total: number
+  in_use: number
+  with_sample: number
+  shown: number
+  filters: { status: string | null }
+  rows: KbTemplate[]
+}
+
+// ── /api/kb/semantic/health ─────────────────────────────────────────────
+export interface KbSemanticHealth {
+  ok: boolean
+  port: number
+  health?: { model?: string; dim?: number; uptime_s?: number; served?: number }
+  error?: string
+  hint?: string
+}
+
 // ── /api/kb/questions ───────────────────────────────────────────────────
 export interface KbQuestionRow {
   id: string
@@ -110,6 +304,27 @@ export interface KbQuestionRow {
   has_lineage: boolean
   variant_op: string | null
   created_at: string | null
+  // ── PRD-007 来源三维（prov 现取；来源册是 API 现推的，推法随行带出来） ──
+  textbook: string | null
+  use_level: string | null
+  version_conf: string | null
+  src_book: string | null
+  src_book_from: string | null
+  /** 挂在这道题上的审核工单（待处理的必须在列表里看得见） */
+  tickets: { id: string; kind: string; status: string; note: string | null; created_at: string | null }[]
+  ticket_open: number
+  /** 语意搜索时的余弦相似度（非 --like 查询为 undefined） */
+  score?: number | null
+}
+
+/** 来源三维下拉的候选值（🔴 全库口径，不随当前筛选缩水） */
+export interface KbQuestionFacets {
+  textbook: { value: string | null; label: string; count: number }[]
+  use_level: { value: string | null; label: string; count: number }[]
+  src_book: { value: string | null; label: string; count: number }[]
+  status: { value: string | null; label: string; count: number }[]
+  ticket_open_total: number
+  question_total: number
 }
 
 export interface KbQuestionPage {
@@ -119,6 +334,33 @@ export interface KbQuestionPage {
   kp_filter: { id: string; name: string; level: string; status: string; matched_by: string; word: string } | null
   /** 🔴 这个考点词在库里 resolve 不到（页面照实标，别当"没筛"糊过去） */
   kp_unresolved: string | null
+  unresolved: Record<string, string[]> | null
+  filters: {
+    kp: string | null
+    status: string | null
+    source_kind: string | null
+    qtype: string[]
+    difficulty: string[]
+    tag: string[]
+    unused: boolean | null
+    textbook: string[]
+    use_level: string[]
+    src_book: string[]
+    ticket: boolean | null
+    like: string | null
+  }
+  /** --like 语意搜索的说明（未用语意搜索时为 null）；missing=候选里还没算向量的题数 */
+  semantic: {
+    model: string
+    dim: number
+    candidates: number
+    vectored: number
+    missing: number
+    serve_ms: number | null
+    query: string
+    sql_candidates: number
+  } | null
+  facets: KbQuestionFacets
   rows: KbQuestionRow[]
 }
 

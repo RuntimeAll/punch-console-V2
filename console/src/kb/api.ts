@@ -3,12 +3,18 @@
  * dev 下走 vite 代理 /api/kb → http://127.0.0.1:4310（见 vite.config.ts）。
  */
 import type {
+  KbAliases,
   KbArtifactDetail,
   KbArtifactRow,
+  KbCriteria,
+  KbKpDetail,
+  KbModels,
   KbPaperDetail,
   KbQuestionDetail,
   KbQuestionPage,
+  KbSemanticHealth,
   KbStats,
+  KbTemplates,
   KbTree,
 } from './types'
 
@@ -39,11 +45,56 @@ async function get<T>(path: string): Promise<T> {
 export const kbApi = {
   stats: () => get<KbStats>('/stats'),
   tree: () => get<KbTree>('/kg/tree'),
-  questions: (q: { kp?: string; status?: string; source_kind?: string; page?: number; size?: number }) => {
+  aliases: (q: { kp_id?: string; kind?: string; q?: string } = {}) => {
+    const p = new URLSearchParams()
+    if (q.kp_id) p.set('kp_id', q.kp_id)
+    if (q.kind) p.set('kind', q.kind)
+    if (q.q) p.set('q', q.q)
+    const s = p.toString()
+    return get<KbAliases>(`/kg/aliases${s ? `?${s}` : ''}`)
+  },
+  kp: (id: string) => get<KbKpDetail>(`/kp/${encodeURIComponent(id)}`),
+  models: () => get<KbModels>('/models'),
+  criteria: (q: { line?: string; status?: string; q?: string } = {}) => {
+    const p = new URLSearchParams()
+    if (q.line) p.set('line', q.line)
+    if (q.status) p.set('status', q.status)
+    if (q.q) p.set('q', q.q)
+    const s = p.toString()
+    return get<KbCriteria>(`/criteria${s ? `?${s}` : ''}`)
+  },
+  templates: (q: { status?: string } = {}) => {
+    const p = new URLSearchParams()
+    if (q.status) p.set('status', q.status)
+    const s = p.toString()
+    return get<KbTemplates>(`/templates${s ? `?${s}` : ''}`)
+  },
+  /** 语意 serve 探活：挂了不抛错，回 {ok:false}——页面据此把 --like 搜索框收起来 */
+  semanticHealth: () =>
+    get<KbSemanticHealth>('/semantic/health').catch(
+      (e): KbSemanticHealth => ({ ok: false, port: 4315, error: String(e?.message ?? e) }),
+    ),
+  questions: (q: {
+    kp?: string
+    status?: string
+    source_kind?: string
+    textbook?: string[]
+    use_level?: string[]
+    src_book?: string[]
+    ticket?: boolean
+    like?: string
+    page?: number
+    size?: number
+  }) => {
     const p = new URLSearchParams()
     if (q.kp) p.set('kp', q.kp)
     if (q.status) p.set('status', q.status)
     if (q.source_kind) p.set('source_kind', q.source_kind)
+    for (const v of q.textbook ?? []) p.append('textbook', v)
+    for (const v of q.use_level ?? []) p.append('use_level', v)
+    for (const v of q.src_book ?? []) p.append('src_book', v)
+    if (q.ticket) p.set('ticket', '1')
+    if (q.like) p.set('like', q.like)
     p.set('page', String(q.page ?? 1))
     p.set('size', String(q.size ?? 20))
     return get<KbQuestionPage>(`/questions?${p.toString()}`)

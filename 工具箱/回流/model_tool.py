@@ -54,33 +54,43 @@ def log_skill(conn, action, digest, result, detail, t0):
     conn.commit()
 
 
-def resolve_kp_words(conn, words):
-    """词表→叶子 id 表；任何一个 resolve 不出就整体失败（模型锚点不许猜）。"""
+def resolve_kp_words(conn, words, allow_node=False):
+    """词表→kp id 表；任何一个 resolve 不出就整体失败（模型锚点不许猜）。
+    allow_node=True（2026-08-21 用户令「模型挂靠不固定层级」）：模型可挂叶/节/章任意**存在的**节点
+    ——叶子闸的本意是防题挂章级坏学情分母，模型不进学情分母；题挂载通路（ingest）不走本函数，闸不动。"""
     ids = []
     for w in words:
         w = str(w)
         if re.fullmatch(r'\d{6,15}', w):
-            assert_leaf_kp(conn, w)
+            if allow_node:
+                if not conn.execute('SELECT 1 FROM kp WHERE id=?', (w,)).fetchone():
+                    sys.exit(f'🔴 挂靠节点 {w} 在 kp 表不存在——层级随意≠id 随意')
+            else:
+                assert_leaf_kp(conn, w)
             ids.append(w)
             continue
         hits = [r[0] for r in conn.execute('SELECT id FROM kp WHERE name=?', (w,))]
         if not hits:
             hits = [r[0] for r in conn.execute('SELECT kp_id FROM kp_alias WHERE alias=?', (w,))]
-        leaf = []
-        for h in dict.fromkeys(hits):
-            try:
-                assert_leaf_kp(conn, h)
-                leaf.append(h)
-            except LeafKpError:
-                pass
-        if len(leaf) != 1:
-            sys.exit(f'🔴 考点 {w!r} resolve 命中 {len(leaf)} 个（要恰一）：{leaf}——写 id 消歧或先补 KG')
-        ids.append(leaf[0])
+        if allow_node:
+            ok = list(dict.fromkeys(h for h in hits
+                                    if conn.execute('SELECT 1 FROM kp WHERE id=?', (h,)).fetchone()))
+        else:
+            ok = []
+            for h in dict.fromkeys(hits):
+                try:
+                    assert_leaf_kp(conn, h)
+                    ok.append(h)
+                except LeafKpError:
+                    pass
+        if len(ok) != 1:
+            sys.exit(f'🔴 考点 {w!r} resolve 命中 {len(ok)} 个（要恰一）：{ok}——写 id 消歧或先补 KG')
+        ids.append(ok[0])
     return list(dict.fromkeys(ids))
 
 
 def cmd_solution_add(conn, args):
-    kp_ids = resolve_kp_words(conn, args.kp)
+    kp_ids = resolve_kp_words(conn, args.kp, allow_node=True)
     mid = args.id or 'SM' + datetime.now().strftime('%Y%m%d') + uuid.uuid4().hex[:6]
     dup = conn.execute('SELECT id FROM solution_model WHERE name=? AND status=?',
                        (args.name, '在用')).fetchone()
@@ -97,7 +107,7 @@ def cmd_solution_add(conn, args):
 
 
 def cmd_exam_add(conn, args):
-    kp_ids = resolve_kp_words(conn, args.kp)
+    kp_ids = resolve_kp_words(conn, args.kp, allow_node=True)
     if args.dsl_ref:
         if Path(args.dsl_ref).is_absolute():
             sys.exit(f'🔴 dsl_ref 必须相对 v2 根（老货架 717 行绝对路径全断的教训）：{args.dsl_ref}')

@@ -9,7 +9,7 @@ import type { KbPaperDetail, KbPaperRow, KbPapers } from '@/kb/types'
 import '@/kb/kb.css'
 
 /**
- * 卷库 · 真库 /kb/papers（PRD-007 二轮页面线 第 3 件）
+ * 卷库 /papers（PRD-007 二轮页面线 第 3 件；2026-08-21 真库转正为正式页）
  * ═══════════════════════════════════════════════════════════════════════
  * 为什么单开一页：资料册页是**册**的视角（一本账 → 册 → 卷），可产线真正的作业单位是**卷**。
  * 「库里现在有哪些卷、每张多少题多少分、哪张还没记满分」这类问题，在册视角下要一本本点开才看得到。
@@ -136,7 +136,7 @@ export function KbPapersPage() {
           <span style={{ color: '#cf1322' }}>🔴 断链：册 {r.artifact_id} 不在库</span>
         ) : v ? (
           <div style={{ minWidth: 140 }}>
-            <Link to={`/kb/artifacts`}>{v}</Link>
+            <Link to={`/artifacts`}>{v}</Link>
             {r.artifact_细类 ? (
               <Tag color={SUBKIND_COLOR[r.artifact_细类] ?? 'default'} style={{ marginInlineStart: 4 }}>
                 {r.artifact_细类}
@@ -158,7 +158,7 @@ export function KbPapersPage() {
 
   return (
     <PageFrame
-      title="卷库 · 真库"
+      title="卷库"
       desc="产线的作业单位是「卷」不是「册」——本页把 kb.db 的 paper 拉平成一屏：每张卷多少题、多少分、多长时间、归哪本册。点开看逐题（题面 / 题型难度 / 考点 / 状态）。页面只读，组卷走 工具箱/组卷/paper_tool.py。"
       extra={
         <Space size={8} wrap>
@@ -412,7 +412,7 @@ function PaperDetail({
         />
         <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
           要看整卷题面 + 答案 + 解析的「一天一屏」渲法，去
-          <Link to="/kb/artifacts"> 资料册 · 真库 </Link>
+          <Link to="/artifacts"> 资料册 </Link>
           从册里点开这张卷。本页是卷级速览：一屏看清题号 / 题面 / 题型难度 / 考点 / 状态的配比。
         </Typography.Paragraph>
       </Card>

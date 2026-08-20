@@ -6,7 +6,7 @@ import { kbApi } from '@/kb/api'
 import type { KbCriteria, KbCriterion } from '@/kb/types'
 
 /**
- * 维护 · 判据沉淀 · 真库 /kb/criteria（PRD-007 线2 去 mock 第 3 页）
+ * 维护 · 判据沉淀 /criteria（PRD-007 线2 去 mock 第 3 页；2026-08-21 真库转正为正式页）
  *
  * 版面照搬 mock 页 /criteria（注入机制说明 + 产线页签 + 现行/废止分段 + 一条一张卡），
  * 数据换成真库：GET /api/kb/criteria（criterion 表）。
@@ -135,7 +135,7 @@ export function KbCriteriaPage() {
 
   return (
     <PageFrame
-      title="维护 · 判据沉淀 · 真库"
+      title="维护 · 判据沉淀"
       desc={
         <>
           错因管理沉淀的是<b>学生</b>的错（挂考点）；本页沉淀的是<b>产线自己</b>的判断经验（挂产线）——

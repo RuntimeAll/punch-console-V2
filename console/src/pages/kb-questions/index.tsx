@@ -322,7 +322,7 @@ export function KbQuestions() {
 
   return (
     <PageFrame
-      title="题库 · 真库"
+      title="题库"
       desc={
         <>
           直连 kb.db 的只读视图（页面无任何写口，改题走 skill / 工具箱脚本）。左树点节点按整枝筛题，行点开看全文。

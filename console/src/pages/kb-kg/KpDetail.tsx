@@ -74,7 +74,7 @@ export function KpDetail({ id, detail, loading }: { id: string; detail: KbKpDeta
         }
         extra={
           detail.q_total > 0 ? (
-            <Link to={`/kb/questions?kp=${encodeURIComponent(detail.id)}`}>在题库里看这一枝（{detail.q_total} 题）</Link>
+            <Link to={`/questions?kp=${encodeURIComponent(detail.id)}`}>在题库里看这一枝（{detail.q_total} 题）</Link>
           ) : null
         }
       >
@@ -160,7 +160,7 @@ export function KpDetail({ id, detail, loading }: { id: string; detail: KbKpDeta
       }
       extra={
         detail.q_count > 0 ? (
-          <Link to={`/kb/questions?kp=${encodeURIComponent(detail.id)}`}>在题库里看（{detail.q_count} 题）</Link>
+          <Link to={`/questions?kp=${encodeURIComponent(detail.id)}`}>在题库里看（{detail.q_count} 题）</Link>
         ) : null
       }
     >
@@ -293,7 +293,7 @@ export function KpDetail({ id, detail, loading }: { id: string; detail: KbKpDeta
             ))}
           </div>
           <Typography.Paragraph type="secondary" style={{ fontSize: 12, margin: '6px 0 0' }}>
-            全表在 <Link to="/kb/models">维护 · 考察模型 · 真库</Link>。
+            全表在 <Link to="/model">维护 · 考察模型</Link>。
           </Typography.Paragraph>
         </div>
       ) : null}

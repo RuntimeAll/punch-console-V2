@@ -7,7 +7,7 @@ import { kbApi } from '@/kb/api'
 import type { KbExamModel, KbKpRef, KbModels, KbPatternRow, KbSolutionModel } from '@/kb/types'
 
 /**
- * 维护 · 考察模型 · 真库 /kb/models（PRD-007 线2 去 mock 第 2 页）
+ * 维护 · 考察模型 /model（PRD-007 线2 去 mock 第 2 页；2026-08-21 真库转正为正式页）
  *
  * 版面照搬 mock 页 /model 的三段式设计（三张名片 + 三个页签），数据换成真库：GET /api/kb/models。
  *
@@ -50,7 +50,7 @@ function KpLinks({ kps }: { kps: KbKpRef[] }) {
             </Tag>
           </Tooltip>
         ) : (
-          <Link key={k.id} to={`/kb/kg?kp=${encodeURIComponent(k.id)}`}>
+          <Link key={k.id} to={`/kg?kp=${encodeURIComponent(k.id)}`}>
             <Tag color="blue" style={{ marginInlineEnd: 0, cursor: 'pointer' }}>
               {k.name}
             </Tag>
@@ -310,7 +310,7 @@ function PatternTable({ d }: { d: KbModels }) {
               <Tag color="blue">接手它的 kp.desc 已写 {d.pattern.kp_desc_total} 片叶</Tag>
             </div>
             <div style={{ marginTop: 6 }}>
-              去处：「这类题长什么样」现在看 <Link to="/kb/kg">知识图谱 · 真库</Link> 里每片叶的
+              去处：「这类题长什么样」现在看 <Link to="/kg">知识图谱</Link> 里每片叶的
               <b>考法描述</b>；「怎么造」仍看本页第一段考察模型。
             </div>
           </div>
@@ -387,7 +387,7 @@ export function KbModelsPage() {
 
   return (
     <PageFrame
-      title="维护 · 考察模型 · 真库"
+      title="维护 · 考察模型"
       desc="低频维护区——日常不来，来了就是治理。这里放着「一类题」的三张脸：长什么样（题型目录·已停用）/ 怎么造（考察模型）/ 怎么解（解题模型）。数据直连 kb.db（exam_model / solution_model / question_pattern），页面只读。"
       extra={
         <Space size={8} wrap>

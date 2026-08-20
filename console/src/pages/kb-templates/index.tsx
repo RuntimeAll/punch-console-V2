@@ -6,7 +6,7 @@ import { kbApi } from '@/kb/api'
 import type { KbTemplate, KbTemplateLayer, KbTemplates } from '@/kb/types'
 
 /**
- * 模版库 · 真库 /kb/templates（PRD-007 线2 去 mock 第 4 页；本页 PRD-007 卡面漏列，调度中心裁量补入）
+ * 模版库 /templates（PRD-007 线2 去 mock 第 4 页；2026-08-21 真库转正为正式页，老 /export-preview 重定向到这）
  *
  * 版面照搬 mock 页 /export-preview（模版卡片货架 + 抽屉看参数全表），数据换成真库：GET /api/kb/templates。
  *
@@ -218,7 +218,7 @@ export function KbTemplatesPage() {
 
   return (
     <PageFrame
-      title="模版库 · 真库"
+      title="模版库"
       desc="渲染永远在 agent 本地跑（HTML → Chrome → PDF），系统只登记模版与样张——本页不是渲染器，是模版的货架。数据直连 kb.db 的 template 表，页面只读：不新建、不改参数、不生成 PDF。"
       extra={
         <Space size={8} wrap>

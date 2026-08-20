@@ -139,7 +139,7 @@ export function KbArtifacts() {
 
   return (
     <PageFrame
-      title="资料册 · 真库"
+      title="资料册"
       desc="直连 kb.db 的 artifact / paper / paper_item 三表（只读）。册 → 天 → 单卷逐层下钻，单卷按一天一屏渲。"
       extra={
         <Space size={8} wrap>
@@ -333,7 +333,7 @@ function ArtifactBody({
             },
             { key: 'st', label: '状态', children: <Tag color={ART_STATUS_COLOR[a.status] ?? 'default'}>{a.status}</Tag> },
             { key: 'line', label: '出自产线', children: a.source_line ?? '—' },
-            { key: 'tpl', label: '模版', children: a.template_id ? <Link to={`/kb/templates?tpl=${encodeURIComponent(a.template_id)}`}>{a.template_id}</Link> : '—' },
+            { key: 'tpl', label: '模版', children: a.template_id ? <Link to={`/templates?tpl=${encodeURIComponent(a.template_id)}`}>{a.template_id}</Link> : '—' },
             { key: 'kp', label: '覆盖考点', children: `${a.kp_ids.length} 个` },
             { key: 'del', label: '交付时间', children: a.delivered_at ?? '—' },
             { key: 'link', label: '分享链接', children: a.link ?? '—' },
@@ -358,7 +358,7 @@ function ArtifactBody({
         卷/天列表（按册内序 ord）
         {a.papers.length ? (
           <Link
-            to={`/kb/papers?artifact_id=${encodeURIComponent(a.id)}`}
+            to={`/papers?artifact_id=${encodeURIComponent(a.id)}`}
             style={{ fontSize: 12, marginInlineStart: 10, fontWeight: 400 }}
           >
             在卷库里看这本册的卷 →

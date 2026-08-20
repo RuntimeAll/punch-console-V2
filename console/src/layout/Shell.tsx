@@ -5,13 +5,10 @@ import type { MenuProps } from 'antd'
 import {
   ApartmentOutlined,
   CheckSquareOutlined,
-  CloudServerOutlined,
   DatabaseOutlined,
-  DesktopOutlined,
   FolderOpenOutlined,
-  ImportOutlined,
   PrinterOutlined,
-  TeamOutlined,
+  ProfileOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 
@@ -20,19 +17,15 @@ const { Header, Sider, Content } = Layout
 /**
  * 🔴 全站导航正本 —— 页面组不许自行加菜单项，要加先找用户拍板。
  *
- * V2.1 第二轮改成**分组结构**（三个 SubMenu + 四个单页），因为页面从 6 个涨到 11 个，
- * 平铺一列已经读不出「哪几件事是一条线上的」：
- *   工作台 / 题库 / 资料清单
- *   【批改】学员 · 队列            ← 学生的卷子
- *   【录入】录入记录 · 审核台      ← 题库的入口
- *   【维护】知识图谱 · 考察模型 · 错因管理 · 判据沉淀  ← 低频但必须记账的四样
- *   模版库
- * 🔴 分组名（批改/录入/维护）本身不是页面、不给路由，点它只展开。
+ * 2026-08-21 真库转正版（用户令「真库直接覆盖回去，待办留到一个目录下面」）：
+ *   题库 / 资料册 / 卷库                ← 真库正式页（原「·真库」组转正，后缀摘掉）
+ *   【维护】知识图谱 · 考察模型 · 判据沉淀 ← 真库正式页
+ *   模版库                              ← 真库正式页（老 /export-preview mock 已退役）
+ *   【待办 · 未去mock】工作台 · 待办列表 · 批改两页 · 录入两页 · 错因管理
+ *      ← 还没真库化的页面全收这一组，真库化一页挪出一页（批改=PRD-005，录入=PRD-006）
+ * 🔴 分组名本身不是页面、不给路由，点它只展开。
  * 🔴 Sider 收起时 SubMenu 自动变浮层，所以每个分组必须有 icon（收起后只剩 icon 认路）。
- *
- * 🔴 第三轮改名（用户判词③：全站禁「台账」黑话，一律说人话）：
- *   资料台账 → 资料清单 ｜ 录入·台账 → 录入记录 ｜ 导出预览 → 模版库
- *   批改的「待办」删了：待办只是队列的一个筛子（/grading/queue?mine=1），不配单开一项。
+ * 🔴 全站禁「台账」黑话（用户判词③），命名一律说人话。
  */
 
 type NavLeaf = { key: string; label: string }
@@ -41,32 +34,10 @@ type NavItem =
   | { kind: 'group'; key: string; icon: ReactNode; label: string; children: NavLeaf[] }
 
 const NAV: NavItem[] = [
-  { kind: 'leaf', key: '/', icon: <DesktopOutlined />, label: '工作台' },
-  // 🔴 待办列表 = 自由事项表（定稿 D-14），紧挨工作台：一个是「机器算出来今天该我干什么」，
-  //    一个是「我和 agent 随手记下来的活儿」，两件事挨着摆但绝不合并
-  { kind: 'leaf', key: '/todo', icon: <CheckSquareOutlined />, label: '待办列表' },
   { kind: 'leaf', key: '/questions', icon: <DatabaseOutlined />, label: '题库' },
-  { kind: 'leaf', key: '/artifacts', icon: <FolderOpenOutlined />, label: '资料清单' },
-  {
-    kind: 'group',
-    key: 'g-grading',
-    icon: <TeamOutlined />,
-    label: '批改',
-    children: [
-      { key: '/grading', label: '学员' },
-      { key: '/grading/queue', label: '队列' },
-    ],
-  },
-  {
-    kind: 'group',
-    key: 'g-ingest',
-    icon: <ImportOutlined />,
-    label: '录入',
-    children: [
-      { key: '/ingest', label: '录入记录' },
-      { key: '/review', label: '审核台' },
-    ],
-  },
+  { kind: 'leaf', key: '/artifacts', icon: <FolderOpenOutlined />, label: '资料册' },
+  // 卷库=paper 级视角，资料册=册级视角：同一批数据两个粒度，不合并
+  { kind: 'leaf', key: '/papers', icon: <ProfileOutlined />, label: '卷库' },
   {
     kind: 'group',
     key: 'g-maint',
@@ -75,65 +46,52 @@ const NAV: NavItem[] = [
     children: [
       { key: '/kg', label: '知识图谱' },
       { key: '/model', label: '考察模型' },
-      { key: '/cause', label: '错因管理' },
-      // 错因管理沉淀「学生的错」（挂考点），判据沉淀沉淀「产线自己的判断经验」（挂产线），两页别混
       { key: '/criteria', label: '判据沉淀' },
     ],
   },
+  { kind: 'leaf', key: '/templates', icon: <PrinterOutlined />, label: '模版库' },
   {
-    // 🔴 真库组（PRD-002c）：上面所有页吃 mock，这一组直连 kb.db（/api/kb 只读 API）。
-    //    两套并列不合并——mock 页是设计稿、真库页是数据，混一起改一个必崩另一个。
+    // 🔴 待办组 = 还没接真库的 mock 设计稿，进页顶栏挂橙标。真库化一页挪出一页，清空即删组。
     kind: 'group',
-    key: 'g-kb',
-    icon: <CloudServerOutlined />,
-    label: '真库',
+    key: 'g-todo-mock',
+    icon: <CheckSquareOutlined />,
+    label: '待办·未去mock',
     children: [
-      { key: '/kb/questions', label: '题库·真库' },
-      { key: '/kb/artifacts', label: '资料册·真库' },
-      // PRD-007 二轮：卷库=paper 级视角（资料册是册级）。两页看的是同一批数据的两个粒度，不合并
-      { key: '/kb/papers', label: '卷库·真库' },
-      // PRD-007 线2：维护三页 + 模版库的真库版。与 /kg /model /criteria /export-preview 四个
-      // mock 页**并存**——mock 页在用户走查退役前一字不动，靠这里的「·真库」标注认路。
-      { key: '/kb/kg', label: '知识图谱·真库' },
-      { key: '/kb/models', label: '考察模型·真库' },
-      { key: '/kb/criteria', label: '判据沉淀·真库' },
-      { key: '/kb/templates', label: '模版库·真库' },
+      { key: '/', label: '工作台' },
+      // 待办列表 = 自由事项表（定稿 D-14），与工作台的「现算待办视图」并列不合并
+      { key: '/todo', label: '待办列表' },
+      { key: '/grading', label: '批改·学员' },
+      { key: '/grading/queue', label: '批改·队列' },
+      { key: '/ingest', label: '录入记录' },
+      { key: '/review', label: '审核台' },
+      // 错因管理沉淀「学生的错」（挂考点），判据沉淀沉淀「产线自己的判断经验」（挂产线），两页别混
+      { key: '/cause', label: '错因管理' },
     ],
   },
-  { kind: 'leaf', key: '/export-preview', icon: <PrinterOutlined />, label: '模版库' },
 ]
 
-/** 三个分组默认全展开（走查时一眼看全 11 个页面，不用逐个点开找） */
+/** 分组默认全展开（一眼看全所有页面，不用逐个点开找） */
 const OPEN_KEYS = NAV.filter((n) => n.kind === 'group').map((n) => n.key)
+
+/** 还没真库化的 mock 页前缀（与导航「待办·未去mock」组严格同一份名单，顶栏橙标靠它判） */
+const MOCK_PREFIXES = ['/todo', '/grading', '/ingest', '/review', '/cause']
+const isMockPath = (pathname: string) =>
+  pathname === '/' || MOCK_PREFIXES.some((p) => pathname.startsWith(p))
 
 /**
  * 当前路径归到哪个菜单项高亮。
  * 🔴 顺序敏感：更长的前缀必须写在前面（/grading/queue 要排在 /grading 之前，
- *   否则队列页会把「学员」点亮）。子路由 /questions/:id、/grading/:code 亮父项。
+ *   否则队列页会把「学员」点亮）。子路由 /grading/:code 亮父项；/kb/* 老地址只是
+ *   重定向的一瞬，不用认。
  */
 function activeKey(pathname: string): string {
   if (pathname === '/') return '/'
-  // 🔴 真库两页排最前：/kb/* 与 /questions、/artifacts（mock 页）是**两套页**，绝不能互相点亮
-  if (pathname.startsWith('/kb/questions')) return '/kb/questions'
-  if (pathname.startsWith('/kb/artifacts')) return '/kb/artifacts'
-  if (pathname.startsWith('/kb/papers')) return '/kb/papers'
-  if (pathname.startsWith('/kb/kg')) return '/kb/kg'
-  if (pathname.startsWith('/kb/models')) return '/kb/models'
-  if (pathname.startsWith('/kb/criteria')) return '/kb/criteria'
-  if (pathname.startsWith('/kb/templates')) return '/kb/templates'
-  // 🔴 /todo 必须排在 /grading/todo 的重定向之外单独认：两者不是一个东西
-  if (pathname.startsWith('/todo')) return '/todo'
   if (pathname.startsWith('/grading/queue')) return '/grading/queue'
-  if (pathname.startsWith('/grading')) return '/grading'
-  if (pathname.startsWith('/questions')) return '/questions'
-  if (pathname.startsWith('/artifacts')) return '/artifacts'
-  if (pathname.startsWith('/ingest')) return '/ingest'
-  if (pathname.startsWith('/review')) return '/review'
-  if (pathname.startsWith('/kg')) return '/kg'
-  if (pathname.startsWith('/model')) return '/model'
-  if (pathname.startsWith('/cause')) return '/cause'
-  if (pathname.startsWith('/criteria')) return '/criteria'
-  if (pathname.startsWith('/export-preview')) return '/export-preview'
+  const PREFIXES = [
+    '/questions', '/artifacts', '/papers', '/kg', '/model', '/criteria', '/templates',
+    '/todo', '/grading', '/ingest', '/review', '/cause',
+  ]
+  for (const p of PREFIXES) if (pathname.startsWith(p)) return p
   return ''
 }
 
@@ -155,7 +113,7 @@ export function Shell() {
 
   return (
     <Layout style={{ minHeight: '100%' }}>
-      {/* 顶栏常驻评审标注，任何页面都不许遮挡或改写 */}
+      {/* 顶栏常驻数据源标注，任何页面都不许遮挡或改写 */}
       <Header
         style={{
           display: 'flex',
@@ -169,17 +127,17 @@ export function Shell() {
       >
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <span style={{ fontSize: 16, fontWeight: 600, color: 'rgba(0,0,0,0.88)' }}>知识工厂 V2.1</span>
-          <span style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>V2.1 原型</span>
+          <span style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>桌面工厂控制台 · :4300</span>
         </div>
         {/* 🔴 顶栏这枚标签是「你现在看的是真是假」的唯一告示，必须随页面如实变：
-            /kb/* 是真库页（直连 kb.db 只读），其余页仍是 mock 设计稿。挂着 mock 标签渲真数据 = 说谎。 */}
-        {pathname.startsWith('/kb/') ? (
-          <Tag color="green" style={{ marginInlineEnd: 0 }}>
-            真库数据 · 只读（kb.db）
+            正式页直连 kb.db 只读；「待办·未去mock」组仍是 mock 设计稿。挂错标签 = 说谎。 */}
+        {isMockPath(pathname) ? (
+          <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+            mock 设计稿 · 待去mock
           </Tag>
         ) : (
-          <Tag color="orange" style={{ marginInlineEnd: 0 }}>
-            mock 数据 · 设计稿评审版
+          <Tag color="green" style={{ marginInlineEnd: 0 }}>
+            真库数据 · 只读（kb.db）
           </Tag>
         )}
       </Header>

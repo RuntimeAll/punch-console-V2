@@ -28,7 +28,7 @@ import { KpDetail } from './KpDetail'
 import { PatternFate } from './PatternFate'
 
 /**
- * 维护 · 知识图谱 · 真库 /kb/kg（PRD-007 线2 去 mock 第 1 页）
+ * 维护 · 知识图谱 /kg（PRD-007 线2 去 mock 第 1 页；2026-08-21 真库转正为正式页）
  *
  * 版面照搬 mock 页 /kg 的设计（五张统计卡 + 左树右详情 + 走查提示），数据全换成真库：
  *   GET /api/kb/kg/tree（kp 102 节点五层树）· GET /api/kb/kp/:id（节点详情）· GET /api/kb/kg/aliases（别名层）
@@ -260,7 +260,7 @@ export function KbKg() {
 
   return (
     <PageFrame
-      title="维护 · 知识图谱 · 真库"
+      title="维护 · 知识图谱"
       desc="低频维护区——日常不来，来了就是治理。教材树的家底：版本 → 年级学期 → 单元 → 小节 → 考点五层，哪片叶挂了题、哪一枝还没铺、别名词表乱没乱。数据直连 kb.db（kp / kp_alias / question_kp），页面只读。"
       extra={
         <Space size={8} wrap>

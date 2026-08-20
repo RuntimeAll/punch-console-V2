@@ -84,7 +84,9 @@ cd D:\workplace\ai-bkb-v2\console; pnpm exec vite --port 4300 --strictPort --hos
 curl.exe -s -o NUL -w "%{http_code}" --noproxy "*" http://127.0.0.1:4300/
 # 读 API + 语意 serve（常驻一对，启动台幂等管）：python 工具箱\启动台.py（--status 只探活 / --stop 全停）
 # 手机展示台（punch-console 投影，2026-08-20 改判转任）：数据重建 python 工具箱\桥\投影同步.py；
-# 起服 punch-console\web\serve-v2.ps1（next start :3000，换库须重启进程）；冻结的 资料库.db 仍只读存档
+# 起服=node 直启（serve-v2.ps1 会触发 pnpm 依赖体检→gyp 编译必败，别用）：
+#   cd punch-console\web; node node_modules\next\dist\bin\next start -H 0.0.0.0 -p 3000
+# kb.db 变了不自动跟：重跑投影脚本+重启 :3000；冻结的 资料库.db 仍只读存档
 # Chrome 截图/出 PDF（撞正开着的 Chrome 会静默不写文件）
 # --headless=new --disable-gpu --no-proxy-server --user-data-dir=<临时profile>，截完 sleep 再验文件存在
 ```

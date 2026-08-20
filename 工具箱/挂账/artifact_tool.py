@@ -104,13 +104,14 @@ def cmd_add(conn, args):
     note = args.note
     if note:
         json.loads(note)                      # 验 JSON（宣发字段包）
+    subkind = getattr(args, 'subkind', None) or '组卷册'   # 细类（§2.6d）：组卷册/发布包/历史册，DDL CHECK 兜底
     conn.execute(
         'INSERT INTO artifact(id,name,kind,status,files_json,source_line,template_id,'
-        'kp_ids_json,link,note,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        'kp_ids_json,link,note,created_at,细类) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
         (aid, args.name, args.kind, '在产', json.dumps(files, ensure_ascii=False),
          args.source_line, args.template,
          json.dumps(kp_ids, ensure_ascii=False) if kp_ids else None,
-         args.link, note, now()))
+         args.link, note, now(), subkind))
     conn.commit()
     print(f'挂账：{aid} {args.name}（{args.kind}，{len(files)} 件，考点 {kp_ids}）')
     return aid, f'{args.name} files={len(files)}'
@@ -219,6 +220,7 @@ def main():
     s.add_argument('--file', action='append'); s.add_argument('--kp', action='append')
     s.add_argument('--source-line', dest='source_line'); s.add_argument('--template')
     s.add_argument('--link'); s.add_argument('--note'); s.add_argument('--id')
+    s.add_argument('--subkind', choices=['组卷册', '发布包', '历史册'])   # 细类（§2.6d），缺省 组卷册
     s = sub.add_parser('files'); s.add_argument('--id', required=True); s.add_argument('--file', action='append')
     s = sub.add_parser('status'); s.add_argument('--id', required=True); s.add_argument('--to', required=True)
     s = sub.add_parser('link'); s.add_argument('--id', required=True); s.add_argument('--url', required=True)

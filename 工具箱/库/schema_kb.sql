@@ -194,7 +194,8 @@ CREATE TABLE IF NOT EXISTS artifact (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL,
   kind         TEXT NOT NULL CHECK(kind IN ('打卡册','专项卷','举一反三','讲义','报告模版','其他')),
-  status       TEXT NOT NULL CHECK(status IN ('在产','已交付','已上架')),
+  -- 退役=账面下线不物理删（2026-08-20 窗I 重建表落地，PRD-008 §一③ 清理口径）
+  status       TEXT NOT NULL CHECK(status IN ('在产','已交付','已上架','退役')),
   files_json   TEXT,                        -- 成品件指针（asset hash / 相对路径 / 网盘链接）
   source_line  TEXT,
   template_id  TEXT REFERENCES template(id),
@@ -204,7 +205,10 @@ CREATE TABLE IF NOT EXISTS artifact (
   note         TEXT,
   created_at   TEXT,
   -- 售卖态（§2.6c）：🔴 人工列，产线任何代码不许写（能发≠已发）；存量库补列走 apply_ddl_263.py
-  sale_state   TEXT CHECK(sale_state IN ('在售','待整理','停售'))
+  sale_state   TEXT CHECK(sale_state IN ('在售','待整理','停售')),
+  -- 细类（2026-08-20 窗I，数据结构 §2.6d）：组卷册=v2 产线成品｜发布包=打包销售件（note 携宣发 JSON）
+  -- ｜历史册=老区平移（punch_map 有 doc 映射）。展示台分流靠它，不靠命名猜
+  细类         TEXT NOT NULL DEFAULT '组卷册' CHECK(细类 IN ('组卷册','发布包','历史册'))
 );
 
 -- ---------------------------------------------------------------------

@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
-"""pattern_tool —— 题型簇抽取入库（question_pattern 表的唯一写入通路）。
+"""pattern_tool —— 🔴🔴【已停用·勿跑】题型簇抽取入库（question_pattern 唯一写入通路）。
 
+停用裁决（2026-08-19 对齐-003，正本=记录/口径对齐记录.md）：不设与考点平行的题型实体层；
+讲义"题型N"=考点本身的考法面，归 kp.desc；本脚本产出的 173 行已清空，question_pattern 停用。
+🔴 跑它=往停用表写数据（违例）。留档理由：抽取逻辑（正则锚点+叶锚定三级回退）是资产，
+下一个复用者=「考点描述补齐工具」（写入目标改 kp.desc，走 kg_tool 通路），改造前本文件只读不执行。
+锚定结果留档：工具箱/kg/题型锚定映射.json。
+
+--- 以下为停用前原文档 ---
 2026-08-19 用户拍板：题型与考点平行、成簇状、携教研属性（emphasis/freq/diff_code 空置待人工定标）。
 用法：
     python pattern_tool.py build --pdf <讲义.pdf> --db <kb.db> [--apply]
@@ -11,6 +18,7 @@
 """
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')   # 停用闸走 stderr，GBK 控制台会把中文压成转义
 import argparse
 import hashlib
 import json
@@ -94,6 +102,13 @@ def anchor_leaf(conn, lect, kpn, cache):
 
 
 def main():
+    raise SystemExit(
+        '🔴 pattern_tool 已停用（2026-08-19 对齐-003）：不设题型簇实体层，讲义题型归 kp.desc。\n'
+        '   要复用抽取逻辑请改造为「考点描述补齐工具」（写入目标 kp.desc，走 kg_tool 通路），\n'
+        '   改造时删除本闸并在 记录/口径对齐记录.md 勾销对应执行项。')
+
+
+def _main_停用前原文():
     ap = argparse.ArgumentParser(description='题型簇抽取入库（question_pattern 唯一写入通路）')
     sub = ap.add_subparsers(dest='cmd', required=True)
     b = sub.add_parser('build')

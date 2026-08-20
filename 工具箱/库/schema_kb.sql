@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS asset (
 );
 
 -- ---------------------------------------------------------------------
--- question_pattern —— 题型目录「这类题长什么样」（老区 326 条精华；数据结构 §2.1④）
+-- question_pattern —— 🔴🔴【停用】（2026-08-19 对齐-003）：建表保留、零行零写入，
+--   "这类题长什么样"改归 kp.desc + kp 教研属性四列；详见文末停用段与 认知/数据结构.md §2.1④
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS question_pattern (
   id          TEXT PRIMARY KEY,
@@ -480,12 +481,12 @@ CREATE TABLE IF NOT EXISTS punch_map (
 -- ALTER TABLE artifact ADD COLUMN sale_state TEXT CHECK(sale_state IN ('在售','待整理','停售'));
 
 -- ---------------------------------------------------------------------
--- question_pattern 扩列 —— 题型簇教研属性（2026-08-19 用户拍板；正本=认知/题型簇口径草案.md）
--- 🔴 单名制纪律现场执法：题型簇=既有 question_pattern 表本尊，不另建 pattern（同物两名坑，
---   2026-08-19 差点犯，当场纠正）。与考点平行：题型挂 1..n 叶（kp_ids_json），题挂题型
---   （question.pattern_id → question_pattern.id 早已留位）。
--- 🔴 emphasis/freq/diff_code 是教研属性（内容不是学情），初值空置待人工/判据定标，LLM 只匹配不自评。
--- ALTER 非幂等，存量库补列走 pragma 探测（已于 2026-08-19 主位执行）：
+-- 🔴🔴 question_pattern 【已停用】（2026-08-19 对齐-003 用户裁决，正本=记录/口径对齐记录.md）
+--   撤回原因：讲义"题型N"标题本质是考点簇=考点本身的考法面，不设平行实体层。
+--   处置：表与下列扩列**保留不动**（不做 schema 手术），数据清空 173 行，此后零写入零查询；
+--        考法描述归 kp.desc、教研属性归 kp.emphasis/freq/diff_code（对齐-001，见 kp 建表段）；
+--        question.pattern_id 同步停用（列保留不写值）。
+--   下方扩列已于 2026-08-19 主位执行完毕，留档不撤（撤列=schema 手术，无收益）：
 --   ALTER TABLE question_pattern ADD COLUMN emphasis  TEXT CHECK(emphasis IN ('重点','难点','重难点','常规'));
 --   ALTER TABLE question_pattern ADD COLUMN freq      TEXT CHECK(freq IN ('高频','中频','低频'));
 --   ALTER TABLE question_pattern ADD COLUMN diff_code TEXT;

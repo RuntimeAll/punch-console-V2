@@ -78,6 +78,7 @@ CSS = """
           padding-bottom: 2mm; border-bottom: .35mm solid #000; }
   .info span { display: inline-block; width: 24mm; border-bottom: .3mm solid #000;
                margin: 0 1mm; }
+  .info .fix { white-space: nowrap; }
   .info .fix { color: #444; }
 
   /* ── 考点块：左侧竖条 + 黑体标题；四块均分剩余空间 ── */
@@ -147,7 +148,7 @@ def render_card(idx, data, ans, ctx):
     if not ans:
         suggest = ctx.get('suggest_min')
         o.append('<div class="info">学生：<span></span>　用时：<span></span>'
-                 + ('　<span class="fix">建议时长：%s 分钟</span>' % suggest if suggest else '')
+                 + ('　<span class="fix">建议时长：%s分钟</span>' % suggest if suggest else '')
                  + '</div>')
 
     show_lv = ctx.get('show_lv', True)

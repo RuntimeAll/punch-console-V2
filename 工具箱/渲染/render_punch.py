@@ -59,7 +59,9 @@ def md2html(md):
     if opened:
         sys.exit('🔴 $ 定界不成对：%s' % md[:60])
     out.append(_html.escape(md[pos:], quote=False))
-    return ''.join(out).replace('\n', '<br>')
+    s = ''.join(out)
+    s = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', s)      # md 加粗（解析里常用 **(1)**）
+    return s.replace('\n', '<br>')
 
 
 def first_text_md(blocks):
@@ -70,8 +72,8 @@ def first_text_md(blocks):
     return ''
 
 
-def answer_html(q):
-    raw = q.get('answer_blocks_json')
+def answer_html(q, field='answer_blocks_json'):
+    raw = q.get(field)
     if not raw or len(raw) <= 20:
         return None
     md = first_text_md(json.loads(raw))
@@ -99,8 +101,11 @@ def adapt(q, slot):
     if slot == 'fill':
         return {'text': text, 'ans': ans or '（待补答案）'}
     if slot == 'word_multi':
+        # 答案卷口径：解答题印**完整过程**（analysis），没有解析才退回只印结论——
+        # 老区打卡线的定版（"答案卷给完整计算过程不只是得数，孩子能自己定位错在第几步"）
+        deep = answer_html(q, 'analysis_blocks_json')
         return {'text': text,
-                'lines': [ans] if ans else ['（待补答案）'], 'ansline': ''}
+                'lines': [deep or ans or '（待补答案）'], 'ansline': ''}
     sys.exit('🔴 本出件器暂只适配 choice/fill/word_multi 三个槽位，来的是 %r' % slot)
 
 
@@ -128,7 +133,7 @@ def main():
             slot = grp.get('slot', 'word_multi')
             items = []
             for ref in grp['items']:
-                q = conn.execute('SELECT id, blocks_json, answer_blocks_json '
+                q = conn.execute('SELECT id, blocks_json, answer_blocks_json, analysis_blocks_json '
                                  'FROM question WHERE id=?', (ref['qid'],)).fetchone()
                 if q is None:
                     sys.exit('🔴 题 %s 库里不存在' % ref['qid'])

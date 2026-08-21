@@ -31,7 +31,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '库'))
-from gates import assert_leaf_kp, LeafKpError  # noqa: E402
+from gates import assert_mounted_kp, LeafKpError  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / '知识库' / 'kb.db'
@@ -60,26 +60,30 @@ def log_skill(conn, action, digest, result, detail, t0):
 
 
 def resolve_kp_words(conn, words):
+    """册的 kp_ids_json ＝**覆盖范围指针**，不是题挂载（2026-08-21 窗M 改口径）：
+    走存量挂载闸 assert_mounted_kp（现行+本体层即可，考点/题型都收、不要求枝末端）——
+    「必须末端」是题挂载防学情分母失真的闸，册级覆盖挂已细分的考点天经地义
+    （一册盖整片考点含其全部题型）。同款先例＝model_tool 的 allow_node。"""
     ids = []
     for w in words or []:
         w = str(w)
         if re.fullmatch(r'\d{6,15}', w):
-            assert_leaf_kp(conn, w)
+            assert_mounted_kp(conn, w)
             ids.append(w)
             continue
         hits = [r[0] for r in conn.execute('SELECT id FROM kp WHERE name=?', (w,))]
         if not hits:
             hits = [r[0] for r in conn.execute('SELECT kp_id FROM kp_alias WHERE alias=?', (w,))]
-        leaf = []
+        ok = []
         for h in dict.fromkeys(hits):
             try:
-                assert_leaf_kp(conn, h)
-                leaf.append(h)
+                assert_mounted_kp(conn, h)
+                ok.append(h)
             except LeafKpError:
                 pass
-        if len(leaf) != 1:
-            sys.exit(f'🔴 考点 {w!r} resolve 命中 {len(leaf)} 个（要恰一）：{leaf}')
-        ids.append(leaf[0])
+        if len(ok) != 1:
+            sys.exit(f'🔴 考点 {w!r} resolve 命中现行本体节点 {len(ok)} 个（要恰一）：{ok}')
+        ids.append(ok[0])
     return list(dict.fromkeys(ids))
 
 

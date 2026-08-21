@@ -241,11 +241,23 @@ def _check_gfm_table_blank_lines(md, tag, errors):
 # 闸②　考点叶子闸
 # ══════════════════════════════════════════════════════════════════════
 def assert_leaf_kp(conn, kp_id):
-    """kp_id 必须存在、状态现行、level=考点、且无子节点，否则抛 LeafKpError（带原话）。通过返回 True。
+    """kp_id 必须存在、状态现行、level ∈ (考点,题型)、且是所在枝的末端，否则抛 LeafKpError。通过返回 True。
 
     🔴 2026-08-18 补两条（PRD-002 沙盘实测漏洞）：
       · 状态闸：退役叶（并叶/软删后）不许再挂新引用——否则 merge 白做；
       · 层级闸：未铺占位（如空壳单元）无子节点也不是考点，挂上去=老区 62% 挂章级重演。
+
+    🔴 2026-08-21 窗L 改「就近可挂」（认知/数据结构.md §2.2；试验场/2026-08-21-七上发布闭环/KG加层策略.md）：
+      语义从「必须是考点层且无子节点」改为「**必须是所在枝的末端**」——
+      · 考点下**可以**长题型子层（level 放行 '考点' 与 '题型' 两层），树按题量压力一片叶一片叶地长；
+      · 一片考点叶一旦长出题型子节点，它自己**立刻失去挂载资格**，新挂载必须落到题型层
+        （报错话术直接列出可挂的子节点 id+名，让调用方一眼知道改挂哪）；
+      · 理由：旧口径「深了就挂不上」＝要么深要么能挂的死锁，是 KG「不能被拓展」的根；
+        就近可挂让存量 1090 题**零重挂**仍全部合法（旧挂载不因长子而违规，闸只管新写入），
+        同时保住老区血案要防的东西——挂载点永远是末端，学情按考点/题型分轨的分母不失真。
+      · 末端判据只数**非退役**子节点：并叶（机制3）把子节点转退役后，父节点应重新可挂，
+        否则一次并叶会永久废掉一个挂载点。
+      · 模型挂靠（model_tool 的 allow_node 通路）走自己的口径，不受本闸影响。
     """
     if not isinstance(kp_id, str) or not kp_id.strip():
         raise LeafKpError(
@@ -260,16 +272,48 @@ def assert_leaf_kp(conn, kp_id):
         raise LeafKpError(
             f'考点叶子闸：kp_id={kp_id!r}（{name}）status={status!r} 非现行——'
             f'退役叶不收新引用（并叶去向看 note），未铺占位先铺枝再挂。')
-    if level != '考点':
+    if level not in ('考点', '题型'):
         raise LeafKpError(
-            f'考点叶子闸：kp_id={kp_id!r}（{name}）level={level!r} 不是考点层——'
+            f'考点叶子闸：kp_id={kp_id!r}（{name}）level={level!r} 不是考点/题型层——'
+            f'只有本体层（考点、题型）能挂题，目录层（版本/年级学期/单元/小节）一律拒；'
             f'无子节点的空壳枝也不许挂（挂章级=学情分母失真）。')
-    n = conn.execute('SELECT COUNT(*) FROM kp WHERE parent_id = ?', (kp_id,)).fetchone()[0]
-    if n:
+    kids = conn.execute(
+        "SELECT id, name, level FROM kp WHERE parent_id = ? AND status != '退役' "
+        "ORDER BY ord IS NULL, ord, id", (kp_id,)).fetchall()
+    if kids:
+        shown = '、'.join(f'{k[0]}（{k[1]}）' for k in kids[:10])
+        more = f'…共 {len(kids)} 个' if len(kids) > 10 else ''
+        sub_level = kids[0][2]
         raise LeafKpError(
-            f'考点叶子闸：kp_id={kp_id!r}（{name}，level={level}）有 {n} 个子节点，不是叶子。'
-            f'老区 dim1_kp_id 的注释写「挂叶子」，实测 62% 挂在章级（322 个被用考点里 108 个有子节点）——'
-            f'这直接威胁「学情按考点分轨」：分母是考点集，挂章级就等于分母失真。违例拒收不静默。')
+            f'考点叶子闸：{level} {kp_id!r}（{name}）已细分出 {len(kids)} 个{sub_level}，'
+            f'它自己不再是枝末端，不许挂——请挂到{sub_level}层：{shown}{more}。'
+            f'（2026-08-21 就近可挂：题只挂枝末端；老区 dim1_kp_id 注释写「挂叶子」实测 62% 挂在章级，'
+            f'学情按考点分轨的分母就此失真——违例拒收不静默。选不出来就低置信进人审，别硬挂。）')
+    return True
+
+
+def assert_mounted_kp(conn, kp_id):
+    """**存量挂载**合法性闸（取题/组卷侧）：存在 + 现行 + level ∈ (考点,题型)。通过返回 True。
+
+    🔴 与 assert_leaf_kp 的分工（2026-08-21 窗L，随「就近可挂」一并立）：
+      · assert_leaf_kp = **新挂载闸**：挂载点必须是枝末端——考点细分出题型后，新题必须挂题型；
+      · 本闸 = **存量挂载闸**：题早已挂在某考点上，该考点后来长了题型子层，这条账**仍然合法**
+        （零重挂原则——树的生长绝不使旧账变坏账）；取题/组卷/学情侧验挂载一律走本闸，
+        拿新挂闸去筛存量 = 铺枝当天全库存量题被组卷判废（窗L 沙盘实测 964 行会被误杀）。
+      本闸仍拒的：幽灵 id、退役节点、挂在目录层（版本/年级学期/单元/小节）的老区式坏账。
+    """
+    if not isinstance(kp_id, str) or not kp_id.strip():
+        raise LeafKpError(f'存量挂载闸：kp_id={kp_id!r} 非法。')
+    row = conn.execute('SELECT id, name, level, status FROM kp WHERE id = ?', (kp_id,)).fetchone()
+    if row is None:
+        raise LeafKpError(f'存量挂载闸：kp_id={kp_id!r} 在 kp 表里不存在——挂载指着幽灵节点，坏账。')
+    name, level, status = row[1], row[2], row[3]
+    if status != '现行':
+        raise LeafKpError(f'存量挂载闸：kp_id={kp_id!r}（{name}）status={status!r} 非现行——'
+                          f'退役节点的挂载该随并叶迁走（去向看 note）。')
+    if level not in ('考点', '题型'):
+        raise LeafKpError(f'存量挂载闸：kp_id={kp_id!r}（{name}）level={level!r} 在目录层——'
+                          f'挂章级=学情分母失真，这笔账要修（老区 62% 挂章级的血案）。')
     return True
 
 

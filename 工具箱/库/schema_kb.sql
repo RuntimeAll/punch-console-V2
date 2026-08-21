@@ -30,8 +30,11 @@ CREATE TABLE IF NOT EXISTS dict_item (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_dict_item_code ON dict_item(code);
 
 -- ---------------------------------------------------------------------
--- kp —— 知识图谱五层树（对应 D-12 溯源关系；数据结构 §2.2）
+-- kp —— 知识图谱六层树（对应 D-12 溯源关系；数据结构 §2.2）
 -- id 体系沿用老区：变长字符串每 3 位一层（level=len/3）；名字不沿用，v2 重起干净名。
+-- 🔴 2026-08-21 窗L 加第六层「题型」（考点之下，可选长）：level CHECK 扩 '题型'，
+--   挂载口径＝就近可挂（gates.assert_leaf_kp：题只挂枝末端，考点没长题型就照挂考点，
+--   长了题型就必须挂题型）。存量库改 CHECK 走 工具箱/库/apply_ddl_窗L题型层.py（重建表）。
 -- 🔴 裁量：SSOT「P0 三修」要求「同名亲兄弟合并并加 UNIQUE(parent_id,name)」——
 --   SQLite 里 NULL 互不相等，根节点（parent_id IS NULL）不受该 UNIQUE 约束，
 --   故补一条 partial index 管住根级重名。
@@ -40,7 +43,7 @@ CREATE TABLE IF NOT EXISTS kp (
   id        TEXT PRIMARY KEY,
   name      TEXT NOT NULL,                 -- 考点名（卷面可用的干净名，叶子=名词短语不带编号年级题型）
   parent_id TEXT REFERENCES kp(id),
-  level     TEXT NOT NULL CHECK(level IN ('版本','年级学期','单元','小节','考点')),
+  level     TEXT NOT NULL CHECK(level IN ('版本','年级学期','单元','小节','考点','题型')),
   ord       INTEGER,                       -- 同级排序（编号只在结构列，不进名字）
   status    TEXT NOT NULL CHECK(status IN ('现行','未铺','退役')),
   note      TEXT,

@@ -38,7 +38,7 @@ from gates import assert_leaf_kp, LeafKpError  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB = ROOT / '知识库' / 'kb.db'
-LEVELS = ('版本', '年级学期', '单元', '小节', '考点')
+LEVELS = ('版本', '年级学期', '单元', '小节', '考点', '题型')   # 🔴 2026-08-21 窗L 加第六层「题型」
 
 # kp_ids_json 引用巡查清单（merge 时要迁的 JSON 数组列）
 KP_JSON_COLS = [
@@ -160,9 +160,11 @@ def cmd_add_leaf(conn, args):
         seq = max([int(s[-3:]) for s in sibs], default=0) + 1
         nid = f'{args.parent}{seq:03d}'
     ord_ = args.ord if args.ord is not None else int(nid[-3:])
-    r = upsert_node(conn, nid, args.name, args.parent, '考点', ord_, '现行', args.note)
+    # 🔴 2026-08-21 窗L：挂在小节下=考点，挂在考点下=题型（第六层）——层名跟父走，别写死
+    lv = '题型' if parent[1] == '考点' else '考点'
+    r = upsert_node(conn, nid, args.name, args.parent, lv, ord_, '现行', args.note)
     conn.commit()
-    print(f'挂叶 {r}: {nid} {args.name}')
+    print(f'挂叶 {r}: {nid} {args.name}（level={lv}）')
     return f'{nid} {args.name}', r
 
 

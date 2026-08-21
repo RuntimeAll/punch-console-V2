@@ -58,7 +58,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '库'))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '检索'))
-from gates import assert_leaf_kp, LeafKpError  # noqa: E402
+from gates import assert_mounted_kp, LeafKpError  # noqa: E402
 # 🔴 take 的取题条件不在这里手写 SQL：与「找题」共用同一个查询核（D-20 ①②层），
 #    两处各写一份 SQL = 组卷取到的题和页面/CLI 查到的题会悄悄不一致（口径漂移是查不出来的错）。
 from query_core import find_ids, QueryError  # noqa: E402
@@ -134,13 +134,16 @@ def check_question(conn, qid, errs, tag):
     if not kps:
         errs.append(f'{tag} question {qid!r} 没挂考点——裸题不进卷（学情分轨的分母就是考点集）')
         return False
+    # 🔴 存量挂载走 assert_mounted_kp 不走新挂闸（2026-08-21 窗L）：考点细分出题型后，
+    #    存量题留在考点层仍是合法账；拿「必须末端」筛存量=铺枝当天全库存量题被组卷判废。
     for kid in kps:
         try:
-            assert_leaf_kp(conn, kid)
+            assert_mounted_kp(conn, kid)
             return True
         except LeafKpError:
             continue
-    errs.append(f'{tag} question {qid!r} 挂的考点 {kps} 没有一个是现行叶子——挂章级=学情分母失真')
+    errs.append(f'{tag} question {qid!r} 挂的考点 {kps} 没有一个是现行本体节点（考点/题型）——'
+                f'挂章级/退役节点=坏账，先修挂载再组卷')
     return False
 
 

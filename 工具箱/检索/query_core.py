@@ -46,7 +46,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '库'))
-from gates import assert_leaf_kp, LeafKpError  # noqa: E402
+# （窗L 后本文件不再引挂载闸——名字路改「唯一现行本体节点→整枝取」，见 resolve_kp_words）
 
 # ── 值域（与 认知/数据结构.md 一致，改这里=改契约）──────────────────────
 Q_STATUS = ('草稿', '已审', '上架', '退役')
@@ -126,9 +126,14 @@ def resolve_kp_words(conn, words):
 
     🔴 两条路，写法自解释：
       · 纯数字（3~15 位）= **id 前缀取整枝**：该 id 自身 + 全部后代（KG 每 3 位一层的 id 契约），
-        `100002` 就是整章、`100002003` 就是整节、12 位就是那一片叶；前缀零命中=报错不静默；
-      · 非数字 = 名/别名 → **现行叶子恰一命中**（照 paper_tool 原有口径），
+        `100002` 就是整章、`100002003` 就是整节、12 位=叶（其题型子层随前缀天然带上）；
+        前缀零命中=报错不静默；
+      · 非数字 = 名/别名 → **现行本体节点（考点/题型）恰一命中 → 取整枝（自身+现行后代）**。
         0 命中或多命中都拒查（取题锚点不许猜）。
+    🔴 2026-08-21 窗L 改整枝口径：题型层落地后，考点细分出题型的，题散在考点自身与题型子层
+      两处（存量留层+新题落题型）——名字命中考点必须**整枝取**才不漏题；后代用 parent_id
+      递归 CTE 拿（不靠 id 前缀——下一窗新节点 id 不再编码位置，前缀假设只在数字路里保留）。
+      旧写法（assert_leaf_kp 筛叶）在铺枝后会把已细分考点全筛掉——取题解析当场断，沙盘实测有证。
     返回 (ids, notes)：ids 去重保序；notes 为 [(词, 说明)] 供调用方如实打印。
     """
     ids, notes = [], []
@@ -151,20 +156,21 @@ def resolve_kp_words(conn, words):
         if not hits:
             hits = [r[0] for r in conn.execute('SELECT kp_id FROM kp_alias WHERE alias=?', (w,))]
             via = '别名'
-        leaf = []
-        for h in dict.fromkeys(hits):
-            try:
-                assert_leaf_kp(conn, h)
-                leaf.append(h)
-            except LeafKpError:
-                pass
-        if len(leaf) != 1:
+        nodes = [h for h in dict.fromkeys(hits) if conn.execute(
+            "SELECT 1 FROM kp WHERE id=? AND status='现行' AND level IN ('考点','题型')",
+            (h,)).fetchone()]
+        if len(nodes) != 1:
             raise QueryError(
-                f'考点 {w!r} resolve 命中现行叶子 {len(leaf)} 个（要恰一）：{leaf}——'
-                f'名/别名只认叶子；要整枝请写数字 id 前缀（如 100002=整章），'
-                f'要消歧请写 12 位叶 id，缺词先补 KG 别名')
-        ids.append(leaf[0])
-        notes.append((w, f'{via}→叶子 {leaf[0]}'))
+                f'考点 {w!r} resolve 命中现行本体节点（考点/题型）{len(nodes)} 个（要恰一）：{nodes}——'
+                f'目录层（单元/小节）不认名；要整枝请写数字 id 前缀（如 100002=整章），'
+                f'要消歧请写节点 id，缺词先补 KG 别名')
+        branch = [r[0] for r in conn.execute(
+            "WITH RECURSIVE br(id) AS (SELECT ? UNION ALL "
+            "SELECT k.id FROM kp k JOIN br ON k.parent_id=br.id WHERE k.status='现行') "
+            "SELECT id FROM br", (nodes[0],))]
+        ids += branch
+        notes.append((w, f'{via}→节点 {nodes[0]}'
+                      + (f'（整枝 {len(branch)} 个节点）' if len(branch) > 1 else '')))
     return list(dict.fromkeys(ids)), notes
 
 

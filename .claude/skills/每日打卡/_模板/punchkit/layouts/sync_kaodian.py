@@ -51,7 +51,7 @@ SPEC = {
             '`textbook_spread` 的**范式 B（考点分组）**（红标题 + 口诀 + 全大题），'
             '首用 = 七上第二单元打卡册（人教版）。本骨架是另一种长相（页眉册名小字 + '
             '竖条考点块 + 易/中标记），要「考点型」先去看那边，别在这里重开一套',
-    '旋钮': 'book_title=册名(页眉小字)｜unit_title=单元名(大标题)｜suggest_min=建议时长(分钟)｜'
+    '旋钮': 'book_title=册名(页眉小字)｜unit_title=单元名(大标题)｜subtitle=今日考点条(缺省=当天考点名自动拼，给""可关)｜suggest_min=建议时长(分钟)｜'
             'author=出卷人(页脚)｜show_lv=是否显示易/中标记(缺省True)｜slot=全册缺省槽位｜'
             'watermark=None 可移除',
 }
@@ -61,7 +61,12 @@ CSS = """
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: "SimSun", serif; font-size: __PT__pt; line-height: 1.5; color: #000; }
 
-  .card { width: 186mm; height: 266mm; margin: 0 auto; padding: 9mm 7mm 7mm;
+  /* 🔴 2026-08-21：卡片必须**满页**（照 daily_v1 的 .sheet=210×297 实战尺寸）。
+     原写 186×266mm，比 A4 矮 31mm —— 页脚是相对卡片定位的，卡片矮一截，
+     页脚就永远悬在离纸底 31mm 的地方（用户两次打回的就是这个）。
+     box-sizing:border-box 已全局声明，height 含 padding，不会溢出成残页。
+     左右边距＝padding 19mm（原 12mm 页边 + 7mm 内缩，视觉不变）。 */
+  .card { width: 210mm; height: 297mm; margin: 0 auto; padding: 11mm 19mm 16mm;
           position: relative; display: flex; flex-direction: column;
           page-break-after: always; }
   .card:last-child { page-break-after: auto; }
@@ -72,6 +77,11 @@ CSS = """
   h1 { font-family: "SimHei", sans-serif; font-size: __H1__pt; text-align: center;
        margin: 0 0 2.5mm; }
   h1 .day { font-size: .72em; font-weight: normal; color: #444; margin-left: .4em; }
+  /* 今日考点条（2026-08-21 用户令「标题重做」）：一天练什么写在标题下，
+     不让读者靠猜——考点名由 render_card 从当天数据里取，不用手写 */
+  .sub { text-align: center; font-size: __SUB__pt; color: #444;
+         margin: 0 0 3mm; letter-spacing: .02em; }
+  .sub b { font-family: "SimHei", sans-serif; font-weight: normal; color: #000; }
 
   /* ── 信息栏：学生 / 用时 / 建议时长（建议时长是印死的值，不是填空） ── */
   .info { text-align: center; font-size: __INFO__pt; margin-bottom: 3mm;
@@ -94,14 +104,14 @@ CSS = """
   /* 作答留白：吃掉剩余空间，页数恒等于天数 */
   .sp { flex: 1; min-height: 6mm; }
 
-  .ft { position: absolute; left: 7mm; right: 7mm; bottom: 4.5mm;
-        font-size: __FT__pt; color: #555; display: flex; }
-  .ft .r { margin-left: auto; }
-  .wm { font-family: "SimHei", sans-serif; color: #525252; }
-  .wm img { height: 11pt; vertical-align: -2pt; margin-right: 1mm; }
+  /* 页脚＝组件 components/page_footer（2026-08-21 用户令「作为全局的组件」），
+     CSS 由 css() 拼进来，本文件不再自带页脚样式 */
 
   /* ══ 答案卷：紧排、无留白、允许一天多页 ══ */
-  body.asheet .card { height: auto; }
+  /* 🔴 2026-08-21 用户令「页码和水印都要在页脚」：原写 height:auto，答案卷内容短时
+     card 只有内容那么高，绝对定位的 .ft 就贴在内容末尾浮在页中间。min-height 撑满一页，
+     页脚回到页面底部；内容超一页时仍可自然长高（多页答案不受影响）。 */
+  body.asheet .card { height: auto; min-height: 297mm; }
   body.asheet .sp { display: none !important; }
   body.asheet .kp { margin-bottom: 3mm; }
   body.asheet .info { display: none; }
@@ -116,11 +126,16 @@ def css(pt=None):
     pt = float(pt or 12.0)
     k = pt / 12.0
     from ..renderers import math as _default
+    from .. import components
+    F = components.get('page_footer')
+    # 🔴 闸：本骨架引了页脚组件，卡片就必须满页，否则页脚浮在页中间（组件 docstring 有账）
+    F.assert_full_page_card(CSS)
+    foot = F.css(inset_x='19mm', bottom='9mm', pt=9.0 * k)
     return (CSS.replace('__BK__', '%.2f' % (10.0 * k))
                .replace('__H1__', '%.2f' % (18.0 * k))
+               .replace('__SUB__', '%.2f' % (10.0 * k))
                .replace('__INFO__', '%.2f' % (10.5 * k))
-               .replace('__FT__', '%.2f' % (9.0 * k))
-               .replace('__PT__', '%.2f' % pt)) + _default.CSS
+               .replace('__PT__', '%.2f' % pt)) + foot + _default.CSS
 
 
 def _day_word(idx):
@@ -142,8 +157,20 @@ def render_card(idx, data, ans, ctx):
     o = ['<div class="card">']
     if ctx.get('book_title'):
         o.append('<div class="bk">%s</div>' % ctx['book_title'])
+    # 🔴 标题三行制（2026-08-21 用户令「标题重做」）：
+    #   ① 册名（页眉小字）= 教材+册，家长一眼认得出买的是什么；
+    #   ② 大标题 = 单元名 + 第N天（单元名给册的定位，不是拿小节名硬当标题）；
+    #   ③ 今日考点条 = 当天练的考点顺序列出，**从当天数据里取**（考点名本就是节名，
+    #      不用手写第二遍，天数一多也不会写岔）。ctx['subtitle'] 可显式覆盖。
     o.append('<h1>%s<span class="day">第%s天%s</span></h1>'
              % (ctx.get('unit_title', ''), _day_word(idx), '·参考答案' if ans else ''))
+    if not ans:
+        sub = ctx.get('subtitle')
+        if sub is None:
+            names = [g['name'] for g in data if g.get('name')]
+            sub = '　'.join(names)
+        if sub:
+            o.append('<div class="sub"><b>今日考点</b>　%s</div>' % sub)
 
     if not ans:
         suggest = ctx.get('suggest_min')
@@ -182,15 +209,12 @@ def render_card(idx, data, ans, ctx):
             o.append('<div class="sp"></div>')
         o.append('</div>')
 
-    # 页脚：左=天序，右=出卷人/水印
-    right = []
-    if ctx.get('author'):
-        right.append(ctx['author'])
-    wm = ctx.get('watermark', '玉米训练营')
-    if wm:
-        right.append('<span class="wm">%s%s</span>' % (core.watermark_img(), wm))
-    o.append('<div class="ft"><span>%s</span><span class="r">%s</span></div>'
-             % ('第 %d 天' % (idx + 1), '　'.join(right)))
+    # 页脚走组件（全局一份，见 components/page_footer.py）
+    from .. import components
+    o.append(components.get('page_footer').html(
+        left='第 %d 天' % (idx + 1),
+        right=ctx.get('author') or '',
+        watermark=ctx.get('watermark', '玉米训练营')))
     o.append('</div>')
     return ''.join(o)
 

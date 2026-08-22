@@ -6,6 +6,7 @@ import {
   ApartmentOutlined,
   CheckSquareOutlined,
   DatabaseOutlined,
+  FileDoneOutlined,
   FolderOpenOutlined,
   PrinterOutlined,
   ProfileOutlined,
@@ -18,7 +19,7 @@ const { Header, Sider, Content } = Layout
  * 🔴 全站导航正本 —— 页面组不许自行加菜单项，要加先找用户拍板。
  *
  * 2026-08-21 真库转正版（用户令「真库直接覆盖回去，待办留到一个目录下面」）：
- *   题库 / 资料册 / 卷库                ← 真库正式页（原「·真库」组转正，后缀摘掉）
+ *   题库 / 资料册 / 卷库 / 成品速览      ← 真库正式页（原「·真库」组转正，后缀摘掉）
  *   【维护】知识图谱 · 考察模型 · 判据沉淀 ← 真库正式页
  *   模版库                              ← 真库正式页（老 /export-preview mock 已退役）
  *   【待办 · 未去mock】工作台 · 待办列表 · 批改两页 · 录入两页 · 错因管理
@@ -38,6 +39,8 @@ const NAV: NavItem[] = [
   { kind: 'leaf', key: '/artifacts', icon: <FolderOpenOutlined />, label: '资料册' },
   // 卷库=paper 级视角，资料册=册级视角：同一批数据两个粒度，不合并
   { kind: 'leaf', key: '/papers', icon: <ProfileOutlined />, label: '卷库' },
+  // 成品速览=文件级视角（成品库/ 下的 PDF/图/文档，点行直接预览），与卷库的数据级视角并列不合并
+  { kind: 'leaf', key: '/deliverables', icon: <FileDoneOutlined />, label: '成品速览' },
   {
     kind: 'group',
     key: 'g-maint',
@@ -88,7 +91,7 @@ function activeKey(pathname: string): string {
   if (pathname === '/') return '/'
   if (pathname.startsWith('/grading/queue')) return '/grading/queue'
   const PREFIXES = [
-    '/questions', '/artifacts', '/papers', '/kg', '/model', '/criteria', '/templates',
+    '/questions', '/artifacts', '/papers', '/deliverables', '/kg', '/model', '/criteria', '/templates',
     '/todo', '/grading', '/ingest', '/review', '/cause',
   ]
   for (const p of PREFIXES) if (pathname.startsWith(p)) return p

@@ -49,7 +49,8 @@ function viewerOf(ext: string): Viewer {
   return 'none'
 }
 
-export function KbDeliverables() {
+// 组件名带 Page 后缀：`KbDeliverables` 这个名字已经是响应类型（types.ts），同名会撞
+export function KbDeliverablesPage() {
   const [data, setData] = useState<KbDeliverables | null>(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
@@ -380,4 +381,4 @@ function FilePreview({ row }: { row: KbDeliverableRow }) {
   )
 }
 
-export default KbDeliverables
+export default KbDeliverablesPage

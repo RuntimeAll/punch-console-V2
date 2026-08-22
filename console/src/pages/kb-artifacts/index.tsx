@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Breadcrumb, Button, Card, Collapse, Descriptions, Empty, Space, Spin, Table, Tabs, Tag, Typography } from 'antd'
+import { Alert, Breadcrumb, Button, Card, Collapse, Descriptions, Empty, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { Link, useSearchParams } from 'react-router-dom'
 import PageFrame from '@/components/PageFrame'
 import { KbDocView, KbInline } from '@/kb/KbBlocks'
-import { ARTIFACT_SUBKINDS, kbApi } from '@/kb/api'
+import { ARTIFACT_SUBKINDS, kbApi, kbFileUrl } from '@/kb/api'
 import type { KbArtifactDetail, KbArtifactList, KbArtifactRow, KbArtifactSubkind, KbPaperDetail } from '@/kb/types'
 import '@/kb/kb.css'
 
@@ -32,7 +32,6 @@ const SUBKIND_COLOR: Record<string, string> = { 组卷册: 'blue', 发布包: 'p
 export function KbArtifacts() {
   const [list, setList] = useState<KbArtifactList | null>(null)
   const [err, setErr] = useState('')
-  const [artifactId, setArtifactId] = useState('')
   const [artifact, setArtifact] = useState<KbArtifactDetail | null>(null)
   const [paperId, setPaperId] = useState('')
   const [paper, setPaper] = useState<KbPaperDetail | null>(null)
@@ -41,6 +40,20 @@ export function KbArtifacts() {
   //   外面要能直链到「发布包」那一页，走查时也能把某一页签的链接直接贴给人。
   const [searchParams, setSearchParams] = useSearchParams()
   const rawTab = searchParams.get('sub') ?? ''
+  /**
+   * 🔴 打开哪本册也挂 URL 的 ?id=（同一套口径）：成品速览页的「所属册」链接
+   * （`/artifacts?id=<册id>`）要能**直接把那本册打开**，而不是跳到列表让人再找一遍。
+   */
+  const artifactId = searchParams.get('id') ?? ''
+  const setArtifactId = useCallback(
+    (id: string) => {
+      const next = new URLSearchParams(searchParams)
+      if (id) next.set('id', id)
+      else next.delete('id')
+      setSearchParams(next, { replace: true })
+    },
+    [searchParams, setSearchParams],
+  )
   // 细类列没上线时页签退化：只有「全部」一张表可看
   const tab: KbArtifactSubkind | '全部' =
     list && !list.细类_available
@@ -66,6 +79,8 @@ export function KbArtifacts() {
   }, [])
 
   useEffect(() => {
+    // 换册（含从别的页 ?id= 直链进来）就把上一册停留的单卷视图关掉，别让人看着 A 册的卷以为是 B 册的
+    setPaperId('')
     if (!artifactId) {
       setArtifact(null)
       return
@@ -340,15 +355,32 @@ function ArtifactBody({
             { key: 'note', label: '备注', children: a.note ?? '—' },
           ]}
         />
-        {a.files ? (
+        {a.files?.length ? (
+          // 🔴 files_json 是**字符串数组**（不是 {名:路径} 对象）。原先按 Object.entries 渲，
+          //   页面上显示成「0：路径」——把数组下标当成了文件名。现在每件一个可点链接，
+          //   点开 = /api/kb/file 直读 成品库/ 下的原文件（新窗口）。
           <div style={{ marginTop: 8 }}>
-            成品件：
-            <Space size={4} wrap>
-              {Object.entries(a.files).map(([k, v]) => (
-                <Tag key={k}>
-                  {k}：{String(v)}
-                </Tag>
-              ))}
+            <div style={{ marginBottom: 4 }}>
+              成品件（{a.files.length} 件）
+              <Link to="/deliverables" style={{ fontSize: 12, marginInlineStart: 10 }}>
+                在成品速览里逐件预览 →
+              </Link>
+            </div>
+            <Space size={[10, 4]} wrap>
+              {a.files.map((f) => {
+                const name = String(f).replace(/\\/g, '/').split('/').pop() || String(f)
+                const previewable = /\.(pdf|png|jpe?g|md)$/i.test(String(f)) && String(f).replace(/\\/g, '/').startsWith('成品库/')
+                return previewable ? (
+                  <Typography.Link key={f} href={kbFileUrl(f)} target="_blank" title={f}>
+                    {name}
+                  </Typography.Link>
+                ) : (
+                  // 指针没归一进 成品库/（或扩展名不在白名单）：标灰不给链接，绝不给死链接
+                  <Tooltip key={f} title={`${f}（不在 成品库/ 白名单内，暂不能预览）`}>
+                    <Typography.Text type="secondary">{name}</Typography.Text>
+                  </Tooltip>
+                )
+              })}
             </Space>
           </div>
         ) : null}

@@ -12,7 +12,7 @@ import Cause from '@/pages/cause'
 import KbQuestions from '@/pages/kb-questions'
 import KbArtifacts from '@/pages/kb-artifacts'
 import KbPapersPage from '@/pages/kb-papers'
-import KbDeliverables from '@/pages/kb-deliverables'
+import KbDeliverablesPage from '@/pages/kb-deliverables'
 import KbKg from '@/pages/kb-kg'
 import KbModelsPage from '@/pages/kb-models'
 import KbCriteriaPage from '@/pages/kb-criteria'
@@ -46,6 +46,8 @@ export function App() {
           <Route path="/questions" element={<KbQuestions />} />
           <Route path="/artifacts" element={<KbArtifacts />} />
           <Route path="/papers" element={<KbPapersPage />} />
+          {/* 成品速览：artifact.files_json 拉平成一件一行，点行直接预览（成品库/ 下的原文件） */}
+          <Route path="/deliverables" element={<KbDeliverablesPage />} />
           <Route path="/kg" element={<KbKg />} />
           <Route path="/model" element={<KbModelsPage />} />
           <Route path="/criteria" element={<KbCriteriaPage />} />

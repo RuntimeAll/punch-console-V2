@@ -65,7 +65,14 @@ def corn_icon(size):
     return im.resize((size, size), Image.LANCZOS)
 
 
-def make_sticker(width_px):
+# 底色不透明度（用户 2026-08-22：「背景淡一点、透明一点，字保持原样」）
+# 🔴 只有**底色**半透明：图标与「玉米训练营」五个字仍是实心，压住的笔画照样丢失。
+BG_ALPHA = 110
+EDGE_ALPHA = 190
+SHADOW_ALPHA = 45
+
+
+def make_sticker(width_px, bg_alpha=BG_ALPHA):
     """一张贴纸（RGBA，含描边与投影），宽度 = width_px。"""
     pad = int(width_px * 0.055)
     fs = int(width_px * 0.135)
@@ -80,23 +87,24 @@ def make_sticker(width_px):
     im = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     r = int(h * 0.26)
-    # 🔴 实心（alpha=255）：盖住的字直接没了，不是半透明叠加
-    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=r, fill=FILL + (255,),
-                        outline=EDGE + (255,), width=max(3, int(h * 0.045)))
+    # 底色半透明（能透出题目），描边与文字仍然实心 —— 贴纸感留住、遮挡力留在字上
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=r, fill=FILL + (bg_alpha,),
+                        outline=EDGE + (EDGE_ALPHA,), width=max(3, int(h * 0.045)))
     im.paste(icon_img := corn_icon(icon), (pad, (h - icon) // 2), icon_img)
     d.text((pad + icon + gap, (h - th) // 2 + int(fs * 0.06)), BRAND, font=font,
            fill=TEXT + (255,))
     return im
 
 
-def stamp(src, dst, ratio=0.46, angle=-11):
+def stamp(src, dst, ratio=0.46, angle=-11, bg_alpha=BG_ALPHA):
     im = Image.open(src).convert('RGBA')
     W, H = im.size
-    st = make_sticker(int(W * ratio))
+    st = make_sticker(int(W * ratio), bg_alpha)
     # 投影：贴纸感的关键
     sh = Image.new('RGBA', st.size, (0, 0, 0, 0))
     ImageDraw.Draw(sh).rounded_rectangle([0, 0, st.size[0] - 1, st.size[1] - 1],
-                                         radius=int(st.size[1] * 0.26), fill=(0, 0, 0, 90))
+                                         radius=int(st.size[1] * 0.26),
+                                         fill=(0, 0, 0, SHADOW_ALPHA))
     off = max(3, int(W * 0.004))
     layer = Image.new('RGBA', (st.size[0] + off * 2, st.size[1] + off * 2), (0, 0, 0, 0))
     layer.paste(sh, (off * 2, off * 2), sh)
@@ -113,6 +121,8 @@ def main():
     ap.add_argument('--every', type=int, default=2, help='每隔几张贴一张（2=隔一张）')
     ap.add_argument('--skip-first', action='store_true', default=True)
     ap.add_argument('--ratio', type=float, default=0.46)
+    ap.add_argument('--bg-alpha', type=int, default=BG_ALPHA,
+                    help='底色不透明度 0~255（越小越透，字与图标不受影响）')
     a = ap.parse_args()
     files = sorted(Path(a.dir).glob('*.png'))
     if not files:
@@ -125,7 +135,7 @@ def main():
         if i % a.every:
             print(f'  [{i:>2}] 不贴              {f.name}')
             continue
-        sz = stamp(f, f, a.ratio)
+        sz = stamp(f, f, a.ratio, bg_alpha=a.bg_alpha)
         done.append(f.name)
         print(f'  [{i:>2}] 🟢 贴纸 {sz[0]}×{sz[1]}   {f.name}')
     print(f'\n共 {len(files)} 张，贴了 {len(done)} 张（首图不贴，每 {a.every} 张贴 1 张）')

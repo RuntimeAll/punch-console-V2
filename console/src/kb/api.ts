@@ -117,10 +117,17 @@ export const kbApi = {
   paper: (id: string) => get<KbPaperDetail>(`/papers/${encodeURIComponent(id)}`),
   /** 讲义 173 题型的下落（对齐-003）：103 已锚进 kp.desc / 70 待人工归位 */
   kgPatterns: () => get<KbKgPatterns>('/kg/patterns'),
-  /** 成品速览：artifact.files_json 拉平成「一件一行」。ext 多值（图=png+jpg+jpeg）逗号传 */
-  deliverables: (q: { ext?: string[]; kind?: string; q?: string; page?: number; size?: number } = {}) => {
+  /**
+   * 成品速览：数据源＝ `artifact_file` 表（一件一行带角色/血缘）。
+   * ext 多值（图=png+jpg+jpeg）与 role 多值都逗号传；库里没建表时后端自动回落
+   * files_json 兼容视图并在 `source` 里照实说明。
+   */
+  deliverables: (
+    q: { ext?: string[]; role?: string[]; kind?: string; q?: string; page?: number; size?: number } = {},
+  ) => {
     const p = new URLSearchParams()
     if (q.ext?.length) p.set('ext', q.ext.join(','))
+    if (q.role?.length) p.set('role', q.role.join(','))
     if (q.kind) p.set('kind', q.kind)
     if (q.q) p.set('q', q.q)
     p.set('page', String(q.page ?? 1))
@@ -143,6 +150,29 @@ export const DELIVERABLE_KINDS = [
   { value: 'img', label: '图', exts: ['png', 'jpg', 'jpeg'] },
   { value: 'md', label: '文档', exts: ['md'] },
 ] as const
+
+/**
+ * 成品件角色 → Tag 颜色（成品速览与册详情共用一张表，两处颜色必须一致）。
+ * 🔴 答案卷单独给红：它是**不能混进题目卷发出去**的那一类，颜色上就要一眼分开。
+ */
+export const FILE_ROLE_COLOR: Record<string, string> = {
+  答案卷: 'red',
+  题目卷: 'blue',
+  分析图: 'purple',
+  分析报告: 'purple',
+  页图: 'default',
+  封面: 'default',
+  样张: 'default',
+  其他: 'default',
+}
+
+/** 字节数折成人读大小（成品件动辄几百 KB，摆原始字节数没人读得出来） */
+export const humanBytes = (n: number | null | undefined): string => {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '—' // 🔴 缺就是缺，不显示 0 B
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(2)} MB`
+}
 
 /** 册细类的中文说明（页签下的一句话，值域正本 = artifact.细类 的 CHECK） */
 export const ARTIFACT_SUBKINDS = [

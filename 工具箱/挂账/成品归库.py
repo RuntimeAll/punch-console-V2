@@ -128,9 +128,11 @@ def main():
                     bad.append((aid, old))
         assert not bad, f'🔴 守恒闸②炸：{len(bad)} 件源目标哈希不符 {bad[:3]}'
 
-        # 改指针（跳过缺件册）
+        # 改指针（跳过缺件册）；🔴 artifact_file 表在就同步改它的 rel_path（窗V 双写同源）
+        has_af = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                              "AND name='artifact_file'").fetchone() is not None
         with conn:
-            n_upd = 0
+            n_upd = n_af = 0
             for aid, dirname, pairs, done in plan:
                 if done or any(m[0] == aid for m in missing):
                     continue
@@ -138,6 +140,14 @@ def main():
                 conn.execute('UPDATE artifact SET files_json=? WHERE id=?',
                              (json.dumps(newfiles, ensure_ascii=False), aid))
                 n_upd += 1
+                if has_af:
+                    for old, new in pairs:
+                        if old.replace('\\', '/') != new:
+                            n_af += conn.execute(
+                                'UPDATE artifact_file SET rel_path=? WHERE artifact_id=? '
+                                'AND rel_path=?', (new, aid, old)).rowcount
+            if has_af and n_af:
+                print(f'  同步 artifact_file 路径 {n_af} 行')
 
         # 守恒闸③：新指针逐个可解析
         dangling = []

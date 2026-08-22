@@ -950,6 +950,7 @@ function epArtifacts(db) {
 function epArtifactDetail(db, id) {
   const a = one(db, 'SELECT * FROM artifact WHERE id = ?', id)
   if (!a) return null
+  const hasArtFile = hasTable(db, 'artifact_file')
   const papers = all(
     db,
     `SELECT id, kind, title, ord, layout_json, status, created_at
@@ -1020,7 +1021,20 @@ function epArtifactDetail(db, id) {
     ...humanName(db, a, a.细类 ?? null),
     retired: a.status === '退役',
     kp_ids: a.kp_ids_json ? parseJson(a.kp_ids_json) : [],
+    // 🔴 files 留作**兼容视图**（字符串数组，与库里 files_json 同源同形），别的消费方照旧；
+    //   权威明细走下面的 file_rows（一件一行带 role/bytes/sha256/paper_id 血缘）。
     files: a.files_json ? parseJson(a.files_json) : null,
+    // 🔴 缺表降级：没有 artifact_file 的库回 null + file_rows_available:false，
+    //   页面据此只渲文件名不渲角色 Tag——绝不拿路径去猜一个角色顶上。
+    file_rows_available: hasArtFile,
+    file_rows: hasArtFile
+      ? all(
+          db,
+          `SELECT id, rel_path, role, ord, ext, bytes, sha256, paper_id, note, created_at
+           FROM artifact_file WHERE artifact_id = ? ORDER BY ord, rel_path`,
+          id,
+        )
+      : null,
     // sale_state 由 `...a` 原样带出（人工列，本 API 只读它；改它走 POST /api/kb/sale-state）
     note_obj: noteObj(a.note),
     pan_code: panCode(a.note, a.link),
@@ -2102,13 +2116,132 @@ const extOf = (p) => {
 }
 
 /**
- * 成品件清单：artifact.files_json 拉平成「一件一行」。
- *
- * 🔴 归一未完成期间库里的指针可能还是 `产物/…`。这一行**照实回** `previewable:false`
- *   （顶层再给一个 outside_root_total），页面据此显示「指针未归一，预览待归一后可用」——
- *   绝不静默把它渲成能点的链接，让人点出一个 403 去猜是不是权限坏了。
+ * 🔴 成品件角色的值域——正本＝ `artifact_file.role` 的 CHECK（工具箱/库/schema_kb.sql）。
+ * 这里抄一份是为了给「值域外的 role= 」一个明确的拒收（回 role_invalid + 0 行），
+ * 而不是把打错的筛子当成"没筛"放全量出去。改 DDL 的值域必须同步改这一行。
  */
-function epDeliverables(db, q) {
+const FILE_ROLES = ['题目卷', '答案卷', '分析图', '分析报告', '页图', '封面', '样张', '其他']
+const FILE_ROLE_SET = new Set(FILE_ROLES)
+
+/**
+ * 🔴 表存在探针（口径同 hasCol：缺表**不假装有**，走一条明标出来的降级路）。
+ *
+ * 为什么需要：`artifact_file` 由主线单独排 DDL 窗口落地，沙盘库 / 别人机器上的旧库
+ * 未必已经跑过。缺表时裸 SELECT 会 500（no such table），成品速览整页白屏——
+ * 比"少两列信息"坏得多。降级路一律把 `source` 随响应端出去让页面照实说。
+ */
+function hasTable(db, table) {
+  try {
+    return !!one(db, `SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name = ?`, table)
+  } catch {
+    return false
+  }
+}
+
+/** 一行成品件的公共形状（两条数据源拼出来的行必须长得一模一样，页面才不用分叉） */
+function deliverRow(base) {
+  const norm = String(base.file).replace(/\\/g, '/')
+  const ext = String(base.ext || extOf(norm)).toLowerCase()
+  const rootPrefix = `${DELIVER_ROOT}/`
+  return {
+    file: base.file,
+    // 文件名（basename）单摆一列：路径太长，人认的是文件名
+    basename: norm.slice(norm.lastIndexOf('/') + 1),
+    dir: norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/')) : '',
+    ext,
+    ord: base.ord ?? 0, // 册内文件序（排序次键）
+    // ── artifact_file 权威列（files_json 兼容视图下一律 null，页面据 source 决定显不显）──
+    file_id: base.file_id ?? null,
+    role: base.role ?? null,
+    bytes: base.bytes ?? null,
+    sha256: base.sha256 ?? null,
+    paper_id: base.paper_id ?? null, // 血缘：这件是哪张卷渲出来的
+    file_note: base.file_note ?? null,
+    // ── 所属册 ──
+    artifact_id: base.artifact_id,
+    artifact_name: base.artifact_name,
+    artifact_code_name: base.artifact_code_name,
+    artifact_display_from: base.artifact_display_from,
+    artifact_missing: !!base.artifact_missing, // 🔴 册断链如实标，不静默把它当无册件
+    kind: base.kind ?? null,
+    细类: base.细类 ?? null,
+    status: base.status ?? null,
+    source_line: base.source_line ?? null,
+    delivered_at: base.delivered_at ?? null,
+    note: base.note ?? null,
+    // 🔴 指针是否已归一到 成品库/：false = 文件口会 403，页面必须明说而不是给个死链接
+    previewable: norm.startsWith(rootPrefix) && FILE_EXTS.has(ext),
+    in_root: norm.startsWith(rootPrefix),
+  }
+}
+
+/**
+ * 数据源①（权威）：`artifact_file` 表——一行就是一件，带 role/bytes/sha256/paper_id。
+ * 🔴 LEFT JOIN 不是 JOIN：artifact 断链的件要**看得见**（orphan_total 顶层报），
+ *   用 INNER JOIN 会让坏账在页面上凭空消失。
+ */
+function deliverRowsFromTable(db) {
+  const has细类 = hasCol(db, 'artifact', '细类')
+  const raw = all(
+    db,
+    `SELECT f.id AS file_id, f.artifact_id, f.rel_path, f.role, f.ord, f.ext AS file_ext,
+            f.bytes, f.sha256, f.paper_id, f.note AS file_note,
+            a.id AS a_id, a.name, a.kind, a.status, a.source_line, a.delivered_at, a.note, a.link,
+            ${has细类 ? 'a.细类' : 'NULL'} AS 细类
+     FROM artifact_file f
+     LEFT JOIN artifact a ON a.id = f.artifact_id
+     ORDER BY f.artifact_id, f.ord, f.rel_path`,
+  )
+  // 人话名一册只算一次（humanName 会回查 paper.title，793 件逐件查等于 793 次多余查询）
+  const hnCache = new Map()
+  const rows = raw.map((r) => {
+    const missing = r.a_id === null || r.a_id === undefined
+    let hn
+    if (missing) {
+      hn = { display_name: '🔴 册已不在库（断链）', display_from: 'artifact 断链', code_name: null }
+    } else if (hnCache.has(r.artifact_id)) {
+      hn = hnCache.get(r.artifact_id)
+    } else {
+      hn = humanName(db, { id: r.artifact_id, name: r.name, note: r.note }, r.细类 ?? null)
+      hnCache.set(r.artifact_id, hn)
+    }
+    return deliverRow({
+      file: r.rel_path,
+      ext: r.file_ext,
+      ord: r.ord,
+      file_id: r.file_id,
+      role: r.role,
+      bytes: r.bytes,
+      sha256: r.sha256,
+      paper_id: r.paper_id,
+      file_note: r.file_note,
+      artifact_id: r.artifact_id,
+      artifact_name: hn.display_name,
+      artifact_code_name: hn.code_name,
+      artifact_display_from: hn.display_from,
+      artifact_missing: missing,
+      kind: r.kind,
+      细类: r.细类 ?? null,
+      status: r.status,
+      source_line: r.source_line,
+      delivered_at: r.delivered_at,
+      note: r.note,
+    })
+  })
+  return {
+    rows,
+    badJson: [], // 这条路不解 JSON，坏 JSON 无从谈起（键保留，页面形状不分叉）
+    artifactTotal: new Set(rows.map((r) => r.artifact_id)).size,
+    orphanTotal: rows.filter((r) => r.artifact_missing).length,
+  }
+}
+
+/**
+ * 数据源②（兼容视图）：`artifact.files_json` 拉平成「一件一行」。
+ * 🔴 只在库里还没有 artifact_file 表时走这条（主位 DDL 窗口未执行期间）——
+ *   它吐不出 role/bytes/sha256/paper_id，响应里的 source 会照实说明，页面顶部挂告警。
+ */
+function deliverRowsFromFilesJson(db) {
   const has细类 = hasCol(db, 'artifact', '细类')
   const arts = all(
     db,
@@ -2120,7 +2253,6 @@ function epDeliverables(db, q) {
 
   const rows = []
   const badJson = [] // 🔴 坏 JSON 如实报，不静默当"这册没成品件"
-  const rootPrefix = `${DELIVER_ROOT}/`
   for (const a of arts) {
     let parsed
     try {
@@ -2139,30 +2271,42 @@ function epDeliverables(db, q) {
     items.forEach((raw, i) => {
       const file = String(raw ?? '').trim()
       if (!file) return
-      const norm = file.replace(/\\/g, '/')
-      rows.push({
-        file,
-        // 文件名（basename）单摆一列：路径太长，人认的是文件名
-        basename: norm.slice(norm.lastIndexOf('/') + 1),
-        dir: norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/')) : '',
-        ext: extOf(norm),
-        ord: i, // 册内文件序（排序次键，保持 files_json 里的原序）
-        artifact_id: a.id,
-        artifact_name: hn.display_name,
-        artifact_code_name: hn.code_name,
-        artifact_display_from: hn.display_from,
-        kind: a.kind,
-        细类: a.细类 ?? null,
-        status: a.status,
-        source_line: a.source_line ?? null,
-        delivered_at: a.delivered_at ?? null,
-        note: a.note ?? null,
-        // 🔴 指针是否已归一到 成品库/：false = 文件口会 403，页面必须明说而不是给个死链接
-        previewable: norm.startsWith(rootPrefix) && FILE_EXTS.has(extOf(norm)),
-        in_root: norm.startsWith(rootPrefix),
-      })
+      rows.push(
+        deliverRow({
+          file,
+          ord: i, // 保持 files_json 里的原序
+          artifact_id: a.id,
+          artifact_name: hn.display_name,
+          artifact_code_name: hn.code_name,
+          artifact_display_from: hn.display_from,
+          kind: a.kind,
+          细类: a.细类 ?? null,
+          status: a.status,
+          source_line: a.source_line,
+          delivered_at: a.delivered_at,
+          note: a.note,
+        }),
+      )
     })
   }
+  return { rows, badJson, artifactTotal: arts.length, orphanTotal: 0 }
+}
+
+/**
+ * 成品件清单 —— 数据源＝ `artifact_file` 表（权威明细，一行一件带 role/血缘）。
+ *
+ * 🔴 **降级兜底**：库里没有 artifact_file 表（主位 DDL 窗口未执行）时自动回落到
+ *   `artifact.files_json` 拉平，并把 `source:'files_json(兼容)'` 端出去让页面照实说明
+ *   「角色/血缘列不可用」。不许省这一条——省了就是主位建表前整页 500 白屏。
+ *
+ * 🔴 归一未完成期间库里的指针可能还是 `产物/…`。这一行**照实回** `previewable:false`
+ *   （顶层再给一个 outside_root_total），页面据此显示「指针未归一，预览待归一后可用」——
+ *   绝不静默把它渲成能点的链接，让人点出一个 403 去猜是不是权限坏了。
+ */
+function epDeliverables(db, q) {
+  const hasAf = hasTable(db, 'artifact_file')
+  const src = hasAf ? deliverRowsFromTable(db) : deliverRowsFromFilesJson(db)
+  const { rows, badJson } = src
 
   // 分组计数一律**全量算**（不受当前筛选影响）：筛选器的选项表必须稳定，
   // 否则选了 pdf 之后「图」的计数变 0，看着像库里没有图了
@@ -2173,6 +2317,9 @@ function epDeliverables(db, q) {
   }
   const extStat = countBy('ext')
   const kindStat = countBy('kind')
+  // 🔴 兼容视图下 role 整列没有 ⇒ role_stat 给**空数组**而不是一条「（未标）793」：
+  //   摆一个假档位会让人以为库里 793 件都没标角色（实际是这个库还没这张表）。
+  const roleStat = hasAf ? countBy('role') : []
 
   // ── 筛选 ──────────────────────────────────────────────────────────────
   // ext 支持重复给 + 逗号多值（页面「图」= png,jpg,jpeg 一次传三个）
@@ -2182,12 +2329,22 @@ function epDeliverables(db, q) {
     .filter(Boolean)
   // 🔴 值域外的扩展名不当"不过滤"（与 /materials 的 account/sale_state 同口径）
   const badExt = extWanted.filter((v) => !FILE_EXTS.has(v))
+  // role 同样支持重复给 + 逗号多值（同名多值＝OR）
+  const roleWanted = (q?.getAll('role') ?? [])
+    .flatMap((v) => String(v).split(','))
+    .map((v) => v.trim())
+    .filter(Boolean)
+  const badRole = roleWanted.filter((v) => !FILE_ROLE_SET.has(v))
   const kind = (q?.get('kind') ?? '').trim()
   const kw = (q?.get('q') ?? '').trim().toLowerCase()
 
   let filtered = rows
   if (extWanted.length) {
     filtered = badExt.length ? [] : filtered.filter((r) => extWanted.includes(r.ext))
+  }
+  if (roleWanted.length) {
+    // 🔴 兼容视图下筛不了角色 ⇒ 回 0 行 + role_unavailable，绝不当"没筛"把全量端出去
+    filtered = badRole.length || !hasAf ? [] : filtered.filter((r) => roleWanted.includes(r.role))
   }
   if (kind) filtered = filtered.filter((r) => r.kind === kind)
   if (kw) {
@@ -2217,18 +2374,30 @@ function epDeliverables(db, q) {
     page,
     size,
     file_total: rows.length, // 全库成品件数（不受筛选影响）
-    artifact_total: arts.length, // 挂着成品件的册数
+    artifact_total: src.artifactTotal, // 挂着成品件的册数
     root: DELIVER_ROOT,
+    // 🔴 这一屏的数据从哪来，照实写在响应里（页面据它决定显不显角色列 / 挂不挂兼容告警）
+    source: hasAf ? 'artifact_file' : 'files_json(兼容)',
+    role_available: hasAf,
+    /** role 的完整值域（页面筛选器兜底用；库里 0 件的角色不会出现在 role_stat 里） */
+    role_domain: FILE_ROLES,
     // 🔴 归一进度照实摆：还有多少件的指针没迁进 成品库/（它们预览会 403）
     outside_root_total: rows.filter((r) => !r.in_root).length,
+    // 🔴 artifact 断链的件数（artifact_file 有行、artifact 没这册）——0 才是正常
+    orphan_total: src.orphanTotal,
     filters: {
       ext: extWanted,
       ext_invalid: badExt, // 值域外的扩展名：如实回并给 0 行，不当"没筛"
+      role: roleWanted,
+      role_invalid: badRole, // 同上：值域外的角色如实回并给 0 行
+      // 给了 role= 但这个库还没 artifact_file 表 ⇒ 明说筛不了（0 行不是"库里没有"）
+      role_unavailable: roleWanted.length > 0 && !hasAf,
       kind: kind || null,
       q: kw || null,
     },
     ext_stat: extStat,
     kind_stat: kindStat,
+    role_stat: roleStat,
     bad_json: badJson,
     rows: filtered.slice(off, off + size),
   }
@@ -2429,8 +2598,10 @@ const server = createServer((req, res) => {
           '（sale_state 可写「未标」查未标册；account 可重复给=OR）',
         'GET /api/kb/papers?kind=&status=&artifact_id=（卷库列表：卷名/题数/满分/时长/所属册）',
         'GET /api/kb/papers/:id（逐题预览：题号/题面/题型难度/考点/状态）',
-        'GET /api/kb/deliverables?ext=&kind=&q=&page=&size=' +
-          '（成品速览：artifact.files_json 拉平成一件一行；ext 可逗号多值 pdf,png,jpg,jpeg,md；' +
+        'GET /api/kb/deliverables?ext=&role=&kind=&q=&page=&size=' +
+          '（成品速览：数据源=artifact_file 表，一行一件带 role/bytes/sha256/paper_id 血缘；' +
+          `ext 可逗号多值 pdf,png,jpg,jpeg,md；role 可逗号多值 ${FILE_ROLES.join('/')}；` +
+          '🔴 库里没 artifact_file 表时自动回落 files_json 拉平并回 source="files_json(兼容)"；' +
           '指针没归一到 成品库/ 的行 previewable=false，如实标不装死链）',
         `GET /api/kb/file?path=${DELIVER_ROOT}/…（🔴 唯一非 JSON 出口：成品件原文件 inline 预览；` +
           `只放 ${DELIVER_ROOT}/ 下的 ${[...FILE_EXTS].join('/')}，越界 403、指针指空 404）`,

@@ -20,6 +20,7 @@
   python artifact_tool.py template-list
 """
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -99,6 +100,62 @@ def check_rel_file(f):
 
 _BAD_NAME = re.compile(r'[\\/:*?"<>|\r\n]+')
 
+# 角色判定词表（正本＝工具箱/库/apply_ddl_窗V成品件.py 的 RX；两处必须一致，改一处改两处）
+_ROLE_RX = [
+    ('答案卷', re.compile(r'（答案）|\(答案\)|答案卷|·答案|（解析）|\(解析\)|解析版')),
+    ('分析图', re.compile(r'分析图')),
+    ('分析报告', re.compile(r'考频分析|·分析\.md$|报告')),
+    ('封面', re.compile(r'封面|cover', re.I)),
+    ('样张', re.compile(r'样张|_chk|目检')),
+]
+
+
+def judge_role(base, ext, subkind):
+    for role, rx in _ROLE_RX:
+        if rx.search(base):
+            if role == '分析报告' and ext != 'md':
+                continue
+            return role
+    if ext == 'png':
+        return '页图' if subkind == '历史册' else '其他'
+    return '题目卷' if ext in ('pdf', 'md') else '其他'
+
+
+def sync_files_rows(conn, aid, files):
+    """🔴 files_json 与 artifact_file 双写同源（窗V）：files_json＝兼容视图，
+    artifact_file＝权威明细（角色/哈希/血缘）。整包替换语义——本册旧行先清再建，
+    末尾守恒断言两侧路径集合必须相等（漂移=坏账，宁可炸）。"""
+    row = conn.execute('SELECT 细类 FROM artifact WHERE id=?', (aid,)).fetchone()
+    subkind = row[0] if row else '组卷册'
+    pid = None
+    prow = conn.execute('SELECT id, COUNT(*) OVER () c FROM paper WHERE artifact_id=? LIMIT 2',
+                        (aid,)).fetchall()
+    if len(prow) == 1:                      # 唯一卷才绑血缘，多卷册不猜
+        pid = prow[0][0]
+    conn.execute('DELETE FROM artifact_file WHERE artifact_id=?', (aid,))
+    for i, rel in enumerate(files, 1):
+        base = rel.rsplit('/', 1)[-1]
+        ext = base.rsplit('.', 1)[-1].lower() if '.' in base else ''
+        p = ROOT / rel
+        conn.execute(
+            'INSERT INTO artifact_file(id,artifact_id,rel_path,role,ord,ext,bytes,'
+            'sha256,paper_id,note,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+            ('F' + datetime.now().strftime('%Y%m%d') + uuid.uuid4().hex[:6], aid, rel,
+             judge_role(base, ext, subkind), i, ext,
+             p.stat().st_size if p.exists() else None,
+             _sha256(p) if p.exists() else None, pid, None, now()))
+    got = {r[0] for r in conn.execute(
+        'SELECT rel_path FROM artifact_file WHERE artifact_id=?', (aid,))}
+    assert got == set(files), f'🔴 双写守恒炸：files_json 与 artifact_file 不一致 {aid}'
+
+
+def _sha256(p):
+    h = hashlib.sha256()
+    with open(p, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
 
 def store_files(files, aid, name):
     """🔴 挂账即归库（窗U 用户归一令「所有成品只走一个文件夹」）：
@@ -150,6 +207,7 @@ def cmd_add(conn, args):
          args.source_line, args.template,
          json.dumps(kp_ids, ensure_ascii=False) if kp_ids else None,
          args.link, note, now(), subkind))
+    sync_files_rows(conn, aid, files)                  # 🔴 双写 artifact_file（窗V）
     conn.commit()
     print(f'挂账：{aid} {args.name}（{args.kind}，{len(files)} 件，考点 {kp_ids}）')
     return aid, f'{args.name} files={len(files)}'
@@ -172,8 +230,12 @@ def cmd_files(conn, args):
     files = store_files(files, args.id, row[1])         # 🔴 挂账即归库（窗U）
     conn.execute('UPDATE artifact SET files_json=? WHERE id=?',
                  (json.dumps(files, ensure_ascii=False), args.id))
+    sync_files_rows(conn, args.id, files)               # 🔴 双写 artifact_file（窗V）
     conn.commit()
-    print(f'{args.id} {row[1]} 成品件回填 {len(files)} 件：' + ' '.join(files))
+    roles = conn.execute('SELECT role, COUNT(*) FROM artifact_file WHERE artifact_id=? '
+                         'GROUP BY role', (args.id,)).fetchall()
+    print(f'{args.id} {row[1]} 成品件回填 {len(files)} 件'
+          f'（角色：{"｜".join(f"{r}×{n}" for r, n in roles)}）：' + ' '.join(files))
     return args.id, f'files={len(files)}'
 
 
@@ -216,6 +278,35 @@ def cmd_list(conn, args):
         print(f'{r[0]}\t{r[2]}\t{r[3]}\t{"有链" if r[4] else "无链"}\t{r[1]}')
     print(f'—— artifact 共 {len(rows)} 条')
     return 'list', f'{len(rows)}条'
+
+
+def cmd_files_list(conn, args):
+    """🔴 按角色取件（窗V 硬绑换来的能力）：以前「给我这册的答案卷」只能靠猜文件名。
+    用法：files-list [--id A…] [--role 答案卷] [--dup]"""
+    if args.dup:
+        rows = conn.execute(
+            'SELECT sha256, COUNT(*) n, GROUP_CONCAT(artifact_id) FROM artifact_file '
+            'WHERE sha256 IS NOT NULL GROUP BY sha256 HAVING n > 1 ORDER BY n DESC').fetchall()
+        for sha, n, aids in rows:
+            print(f'{sha[:12]}…\t×{n}\t{aids}')
+        print(f'—— 内容重复 {len(rows)} 组（同一份文件挂在多册）')
+        return 'files-list', f'dup={len(rows)}'
+    where, p = [], []
+    if args.id:
+        where.append('artifact_id=?')
+        p.append(args.id)
+    if args.role:
+        where.append('role=?')
+        p.append(args.role)
+    sql = ('SELECT f.role, f.rel_path, f.bytes, f.paper_id, a.name FROM artifact_file f '
+           'JOIN artifact a ON a.id=f.artifact_id'
+           + (' WHERE ' + ' AND '.join(where) if where else '')
+           + ' ORDER BY f.artifact_id, f.ord')
+    rows = conn.execute(sql, p).fetchall()
+    for role, rel, b, pid, nm in rows:
+        print(f'[{role}]\t{(b or 0) // 1024}KB\t{rel}\t← {nm}' + (f'（卷 {pid}）' if pid else ''))
+    print(f'—— 命中 {len(rows)} 件')
+    return 'files-list', f'{len(rows)}件'
 
 
 def cmd_template_add(conn, args):
@@ -265,6 +356,8 @@ def main():
     s = sub.add_parser('link'); s.add_argument('--id', required=True); s.add_argument('--url', required=True)
     s = sub.add_parser('note'); s.add_argument('--id', required=True); s.add_argument('--json', required=True)
     s = sub.add_parser('list')
+    s = sub.add_parser('files-list', help='按角色取成品件（--role 答案卷/题目卷/分析图…；--dup 查重）')
+    s.add_argument('--id'); s.add_argument('--role'); s.add_argument('--dup', action='store_true')
     s = sub.add_parser('template-add')
     s.add_argument('--id', required=True); s.add_argument('--name', required=True)
     s.add_argument('--purpose'); s.add_argument('--book-kinds', dest='book_kinds')
@@ -276,7 +369,7 @@ def main():
     conn = open_db(args.db)
     try:
         fn = {'add': cmd_add, 'files': cmd_files, 'status': cmd_status, 'link': cmd_link,
-              'note': cmd_note, 'list': cmd_list,
+              'note': cmd_note, 'list': cmd_list, 'files-list': cmd_files_list,
               'template-add': cmd_template_add, 'template-list': cmd_template_list}[args.cmd]
         digest, detail = fn(conn, args)
         log_skill(conn, args.cmd, digest, '成功', detail, t0)

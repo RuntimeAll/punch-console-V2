@@ -478,6 +478,26 @@ export interface KbArtifactDetail extends Omit<KbArtifactRow, 'paper_count' | 'i
    *   成品库归一后每条都是 `成品库/<册id·人话名>/<文件>` 的仓内相对路径。
    */
   files: string[] | null
+  /**
+   * 🔴 成品件的**权威明细**（`artifact_file` 表，一件一行带角色与血缘）。
+   * 库里还没建这张表时＝null（`file_rows_available:false`），页面只渲文件名不渲角色 Tag——
+   * 绝不拿文件名去猜一个角色顶上（猜错＝把答案卷标成题目卷发出去）。
+   */
+  file_rows_available: boolean
+  file_rows:
+    | {
+        id: string
+        rel_path: string
+        role: KbFileRole
+        ord: number | null
+        ext: string | null
+        bytes: number | null
+        sha256: string | null
+        paper_id: string | null
+        note: string | null
+        created_at: string | null
+      }[]
+    | null
   papers: {
     id: string
     kind: string
@@ -614,16 +634,37 @@ export interface KbKgPatterns {
 }
 
 // ── /api/kb/deliverables（成品速览）──────────────────────────────────────
-/** 一件成品文件 = 一行（`artifact.files_json` 拉平；一册 N 件就出 N 行） */
+/** 成品件角色的值域（正本＝ `artifact_file.role` 的 CHECK） */
+export type KbFileRole = '题目卷' | '答案卷' | '分析图' | '分析报告' | '页图' | '封面' | '样张' | '其他'
+
+/**
+ * 一件成品文件 = 一行（数据源＝ `artifact_file` 表；一册 N 件就出 N 行）。
+ * 🔴 `role/bytes/sha256/paper_id` 只有 `source==='artifact_file'` 时才有值——
+ *   兼容视图（库里还没建表）下整列 null，页面必须显示"不可用"而不是编一个。
+ */
 export interface KbDeliverableRow {
   /** 仓内相对路径（归一后一律 `成品库/…`）——预览就是拿它去换 `/api/kb/file?path=` */
   file: string
   basename: string
   dir: string
   ext: string
-  /** 册内文件序（files_json 里的原序，排序次键） */
+  /** 册内文件序（artifact_file.ord；兼容视图下＝files_json 里的原序） */
   ord: number
+  /** artifact_file 行 id（兼容视图下 null） */
+  file_id: string | null
+  /** 这件在册里担的角色（题目卷/答案卷/页图…）；兼容视图下 null */
+  role: KbFileRole | null
+  /** 文件字节数（页面折成 KB/MB）；兼容视图下 null */
+  bytes: number | null
+  /** 内容指纹（页面只显示前 12 位）；兼容视图下 null */
+  sha256: string | null
+  /** 🔴 血缘：这件是哪张卷渲出来的（没记就是 null，不推断） */
+  paper_id: string | null
+  /** artifact_file.note（件级备注，与册级 note 不是一回事） */
+  file_note: string | null
   artifact_id: string
+  /** 🔴 artifact_file 有行但 artifact 没这册＝断链坏账，如实标 */
+  artifact_missing: boolean
   /** 册的人话名（组卷册取卷面标题 / 发布包取 note.标题候选[0]，取不到退回 name） */
   artifact_name: string
   artifact_code_name: string | null
@@ -649,12 +690,34 @@ export interface KbDeliverables {
   artifact_total: number
   /** 白名单根目录名（现为「成品库」） */
   root: string
+  /**
+   * 🔴 这一屏的数据源。`'artifact_file'`＝权威明细（有角色/血缘）；
+   * `'files_json(兼容)'`＝库里还没建 artifact_file 表，页面必须顶部挂告警说明角色列不可用。
+   */
+  source: 'artifact_file' | 'files_json(兼容)'
+  role_available: boolean
+  /** role 的完整值域（库里 0 件的角色不会出现在 role_stat 里，筛选器兜底用） */
+  role_domain: KbFileRole[]
   /** 指针还没归一到 root 下的件数——>0 时页面顶部要挂告警 */
   outside_root_total: number
-  filters: { ext: string[]; ext_invalid: string[]; kind: string | null; q: string | null }
+  /** artifact 断链的件数（artifact_file 有行、artifact 没这册）——0 才是正常 */
+  orphan_total: number
+  filters: {
+    ext: string[]
+    ext_invalid: string[]
+    role: string[]
+    /** 值域外的角色：如实回并给 0 行，不当"没筛" */
+    role_invalid: string[]
+    /** 给了 role= 但这个库还没 artifact_file 表 ⇒ 筛不了（0 行不是"库里没有"） */
+    role_unavailable: boolean
+    kind: string | null
+    q: string | null
+  }
   /** 筛选器选项来源：全量分组计数（不随筛选变化，否则选了 pdf 之后「图」显示 0 会像库里没图） */
   ext_stat: { value: string; count: number }[]
   kind_stat: { value: string; count: number }[]
+  /** 角色分组计数（兼容视图下＝空数组，页面据此把角色筛子收起来） */
+  role_stat: { value: KbFileRole; count: number }[]
   /** files_json 解析不了的册（如实报，不静默当"这册没成品件"） */
   bad_json: { artifact_id: string; name: string; error: string }[]
   rows: KbDeliverableRow[]

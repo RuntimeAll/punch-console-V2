@@ -4,7 +4,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { Link, useSearchParams } from 'react-router-dom'
 import PageFrame from '@/components/PageFrame'
 import { KbDocView, KbInline } from '@/kb/KbBlocks'
-import { ARTIFACT_SUBKINDS, kbApi, kbFileUrl } from '@/kb/api'
+import { ARTIFACT_SUBKINDS, FILE_ROLE_COLOR, kbApi, kbFileUrl } from '@/kb/api'
 import type { KbArtifactDetail, KbArtifactList, KbArtifactRow, KbArtifactSubkind, KbPaperDetail } from '@/kb/types'
 import '@/kb/kb.css'
 
@@ -299,6 +299,10 @@ function ArtifactBody({
   onBack: () => void
 }) {
   if (!a) return <Spin />
+  // 🔴 rel_path → 角色（artifact_file 权威明细）。用 Map 按路径原样对，不做归一化匹配：
+  //   对不上的件宁可不显示角色，也不许"看着像"就贴一个。库里还没建表时这张表为空。
+  //   （不用 useMemo：上面有 `if (!a)` 的提前返回，钩子放这儿会违反 hooks 规则。）
+  const fileRole = new Map((a.file_rows ?? []).map((r) => [r.rel_path, r.role]))
   return (
     <>
       <Card
@@ -365,19 +369,38 @@ function ArtifactBody({
               <Link to="/deliverables" style={{ fontSize: 12, marginInlineStart: 10 }}>
                 在成品速览里逐件预览 →
               </Link>
+              {!a.file_rows_available ? (
+                // 🔴 如实告知：这个库还没建 artifact_file 表，所以一个角色 Tag 都没有
+                <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineStart: 10 }}>
+                  （artifact_file 表未建成，角色标签不可用）
+                </Typography.Text>
+              ) : null}
             </div>
             <Space size={[10, 4]} wrap>
               {a.files.map((f) => {
                 const name = String(f).replace(/\\/g, '/').split('/').pop() || String(f)
                 const previewable = /\.(pdf|png|jpe?g|md)$/i.test(String(f)) && String(f).replace(/\\/g, '/').startsWith('成品库/')
+                // 🔴 角色只认 artifact_file 里按 rel_path 对上的那一行；对不上就不摆 Tag，
+                //   绝不拿文件名去猜（猜错＝把答案卷标成题目卷）。库里还没建表时整片都没有。
+                const role = fileRole.get(String(f)) ?? null
+                const label = (
+                  <>
+                    {role ? (
+                      <Tag color={FILE_ROLE_COLOR[role] ?? 'default'} style={{ marginInlineEnd: 4 }}>
+                        {role}
+                      </Tag>
+                    ) : null}
+                    {name}
+                  </>
+                )
                 return previewable ? (
                   <Typography.Link key={f} href={kbFileUrl(f)} target="_blank" title={f}>
-                    {name}
+                    {label}
                   </Typography.Link>
                 ) : (
                   // 指针没归一进 成品库/（或扩展名不在白名单）：标灰不给链接，绝不给死链接
                   <Tooltip key={f} title={`${f}（不在 成品库/ 白名单内，暂不能预览）`}>
-                    <Typography.Text type="secondary">{name}</Typography.Text>
+                    <Typography.Text type="secondary">{label}</Typography.Text>
                   </Tooltip>
                 )
               })}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Card,
+  Descriptions,
   Drawer,
   Empty,
   Image,
@@ -18,20 +19,24 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import { Link, useSearchParams } from 'react-router-dom'
 import PageFrame from '@/components/PageFrame'
-import { DELIVERABLE_KINDS, kbApi, kbFileUrl } from '@/kb/api'
+import { DELIVERABLE_KINDS, FILE_ROLE_COLOR, humanBytes, kbApi, kbFileUrl } from '@/kb/api'
 import type { KbDeliverableRow, KbDeliverables } from '@/kb/types'
 import '@/kb/kb.css'
 
 /**
  * 成品速览 · 真库页 —— 一件成品文件一行，点行**直接预览**。
  *
- * 🔴 口径三条：
- *   ① 成品 = 挂了账的件（`artifact.files_json` 拉平），全部住在顶层 `成品库/`；
- *      库里没挂账的散件本页看不见——看不见就是没挂账，不是"页面漏了"。
+ * 🔴 口径四条：
+ *   ① 成品 = 挂了账的件，数据源＝ `artifact_file` 表（权威明细：一行一件带
+ *      角色/字节/指纹/所属卷血缘），全部住在顶层 `成品库/`；库里没挂账的散件本页
+ *      看不见——看不见就是没挂账，不是"页面漏了"。
  *   ② **只读**：预览走 `/api/kb/file`（服务端直吐字节，五道路径闸夹着），
  *      页面一个写按钮都没有，也不提供下载/删除/重命名。
  *   ③ 指针没归一进 `成品库/` 的行**如实标灰**（`previewable:false`）并说明原因，
  *      绝不给一个点下去 403 的死链接让人去猜是不是权限坏了。
+ *   ④ 🔴 库里还没建 `artifact_file` 表时后端回落 `files_json` 兼容视图
+ *      （`source==='files_json(兼容)'`）：本页顶部**明说**角色/血缘列不可用，
+ *      角色筛子收起来——不静默摆一列空白让人以为"这批件都没标角色"。
  *
  * 🔴 筛选/分页/预览态全挂 URL（与题库页同一套口径）：一屏 = 一个可直接贴给人的链接，
  *   走查截图也能复现。
@@ -59,6 +64,9 @@ export function KbDeliverablesPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const type = searchParams.get('type') ?? ''
   const kind = searchParams.get('kind') ?? ''
+  /** 角色多选：URL 上是逗号串（`?role=答案卷,题目卷`），与后端同一个写法 */
+  const roleParam = searchParams.get('role') ?? ''
+  const roles = useMemo(() => roleParam.split(',').map((s) => s.trim()).filter(Boolean), [roleParam])
   const q = searchParams.get('q') ?? ''
   const openFile = searchParams.get('file') ?? ''
   const pageNo = Math.max(1, Number(searchParams.get('page') || 1))
@@ -84,14 +92,14 @@ export function KbDeliverablesPage() {
   const reload = useCallback(() => {
     setLoading(true)
     kbApi
-      .deliverables({ ext: exts, kind, q, page: pageNo, size: pageSize })
+      .deliverables({ ext: exts, role: roles, kind, q, page: pageNo, size: pageSize })
       .then((d) => {
         setData(d)
         setErr('')
       })
       .catch((e) => setErr(String(e.message ?? e)))
       .finally(() => setLoading(false))
-  }, [exts, kind, q, pageNo, pageSize])
+  }, [exts, roles, kind, q, pageNo, pageSize])
 
   useEffect(reload, [reload])
 
@@ -113,6 +121,15 @@ export function KbDeliverablesPage() {
         return { value: k.value, label: `${k.label} ${n}` }
       })
   }, [data])
+
+  /** 🔴 兼容视图＝这个库还没建 artifact_file 表：角色/大小/血缘三列没有真值可显示 */
+  const compat = data?.source === 'files_json(兼容)'
+
+  /** 角色筛子的选项：全量分组计数（来自后端 role_stat，不写死也不受当前筛选影响） */
+  const roleOptions = useMemo(
+    () => (data?.role_stat ?? []).map((s) => ({ value: s.value, label: `${s.value}（${s.count}）` })),
+    [data],
+  )
 
   const columns: ColumnsType<KbDeliverableRow> = [
     {
@@ -146,10 +163,36 @@ export function KbDeliverablesPage() {
       ),
     },
     {
+      // 🔴 角色列摆在类型前面：人先问的是「这是题目卷还是答案卷」，扩展名是次要信息
+      title: '角色',
+      dataIndex: 'role',
+      width: 92,
+      render: (v: string | null) =>
+        v ? (
+          <Tag color={FILE_ROLE_COLOR[v] ?? 'default'}>{v}</Tag>
+        ) : (
+          // 兼容视图下整列没值：写「待建表」而不是空白，空白会被读成"这件没标角色"
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {compat ? '待建表' : '未标'}
+          </Typography.Text>
+        ),
+    },
+    {
       title: '类型',
       dataIndex: 'ext',
       width: 78,
       render: (v: string) => <Tag color={EXT_COLOR[v] ?? 'default'}>{v.toUpperCase()}</Tag>,
+    },
+    {
+      title: '大小',
+      dataIndex: 'bytes',
+      width: 88,
+      align: 'right',
+      render: (v: number | null) => (
+        <Typography.Text style={{ fontSize: 12 }} type={v === null ? 'secondary' : undefined}>
+          {humanBytes(v)}
+        </Typography.Text>
+      ),
     },
     { title: '册类别', dataIndex: 'kind', width: 92, render: (v: string) => <Tag>{v}</Tag> },
     {
@@ -173,14 +216,16 @@ export function KbDeliverablesPage() {
       title="成品速览"
       desc={
         <>
-          成品 = 挂了账的件（<Typography.Text code>artifact.files_json</Typography.Text>），全部住在{' '}
-          <Typography.Text code>{data?.root ?? '成品库'}/</Typography.Text>——点任意一行直接预览
+          成品 = 挂了账的件（
+          <Typography.Text code>{compat ? 'artifact.files_json' : 'artifact_file'}</Typography.Text>
+          ），全部住在 <Typography.Text code>{data?.root ?? '成品库'}/</Typography.Text>——点任意一行直接预览
           （PDF 内嵌、图放大、md 读全文）。本页只读，不提供任何写动作。
         </>
       }
       extra={
         <Space size={8} wrap>
           <Tag color="green">真库 · 只读</Tag>
+          {data ? <Tag color={compat ? 'orange' : 'blue'}>源 {data.source}</Tag> : null}
           {data ? (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               共 {data.file_total} 件 · 分属 {data.artifact_total} 册
@@ -202,6 +247,44 @@ export function KbDeliverablesPage() {
               起服务：<Typography.Text code>python 工具箱\启动台.py</Typography.Text>（kb 读 API :4310）
             </>
           }
+        />
+      ) : null}
+
+      {compat ? (
+        // 🔴 如实告知不静默：这个库还没跑 artifact_file 的 DDL，角色/血缘列没有真值可显示
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="artifact_file 表尚未在本库建成，当前为兼容视图，角色/血缘列不可用"
+          description={
+            <>
+              成品件明细正在从 <Typography.Text code>artifact.files_json</Typography.Text> 拉平（只有路径），
+              角色（题目卷/答案卷/页图…）、文件大小、内容指纹、所属卷血缘四项要等主位执行
+              <Typography.Text code>工具箱/库/apply_ddl_窗V成品件.py</Typography.Text> 建表回填之后才有。
+              件数与预览不受影响。
+            </>
+          }
+        />
+      ) : null}
+
+      {data && data.filters.role_invalid.length ? (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={`角色筛子里有值域外的值：${data.filters.role_invalid.join('、')}`}
+          description={`成品件角色的值域只有 ${data.role_domain.join(' / ')}，本次按 0 件返回（不当"没筛"把全量端出来）。`}
+        />
+      ) : null}
+
+      {data && data.orphan_total > 0 ? (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={`${data.orphan_total} 件的所属册在库里查无此条（断链坏账）`}
+          description="artifact_file 里有行、artifact 表里没有那本册。这些行标了「册已不在库」，请走 artifact_tool 清账。"
         />
       ) : null}
 
@@ -233,6 +316,20 @@ export function KbDeliverablesPage() {
             onChange={(v) => setOne('type', String(v))}
             options={typeOptions}
           />
+          {/* 🔴 角色筛子的选项来自后端 role_stat（不写死）；兼容视图下 role_stat 为空
+              ⇒ 整个筛子收起来，不摆一个选了也筛不动的空下拉 */}
+          {roleOptions.length ? (
+            <Select
+              allowClear
+              mode="multiple"
+              placeholder="角色（可多选）"
+              style={{ minWidth: 220 }}
+              maxTagCount="responsive"
+              value={roles}
+              onChange={(v: string[]) => setOne('role', (v ?? []).join(','))}
+              options={roleOptions}
+            />
+          ) : null}
           <Select
             allowClear
             placeholder="册类别"
@@ -264,7 +361,7 @@ export function KbDeliverablesPage() {
           loading={loading}
           dataSource={data?.rows ?? []}
           columns={columns}
-          scroll={{ x: 1054 }}
+          scroll={{ x: 1234 }}
           onRow={(r) => ({
             onClick: () => (r.previewable ? setOne('file', r.file) : undefined),
             style: {
@@ -302,6 +399,9 @@ export function KbDeliverablesPage() {
           current ? (
             <Space size={8} wrap>
               <span>{current.basename}</span>
+              {current.role ? (
+                <Tag color={FILE_ROLE_COLOR[current.role] ?? 'default'}>{current.role}</Tag>
+              ) : null}
               <Tag color={EXT_COLOR[current.ext] ?? 'default'}>{current.ext.toUpperCase()}</Tag>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 所属册{' '}
@@ -355,6 +455,51 @@ function FilePreview({ row }: { row: KbDeliverableRow }) {
         {row.delivered_at ? <span style={{ marginInlineStart: 8 }}>交付于 {row.delivered_at}</span> : null}
         {row.source_line ? <span style={{ marginInlineStart: 8 }}>出自产线 {row.source_line}</span> : null}
       </Typography.Paragraph>
+
+      {/* 🔴 件级事实（角色/大小/血缘/指纹）——只有 artifact_file 表才有；缺的一项就不摆，
+          不拿路径或册级字段凑一个假的顶上 */}
+      <Descriptions
+        size="small"
+        column={2}
+        style={{ marginBottom: 12 }}
+        items={[
+          {
+            key: 'role',
+            label: '角色',
+            children: row.role ? (
+              <Tag color={FILE_ROLE_COLOR[row.role] ?? 'default'}>{row.role}</Tag>
+            ) : (
+              <Typography.Text type="secondary">未建 artifact_file 表，取不到</Typography.Text>
+            ),
+          },
+          { key: 'bytes', label: '大小', children: humanBytes(row.bytes) },
+          {
+            key: 'paper',
+            label: '所属卷',
+            children: row.paper_id ? (
+              // 🔴 血缘：这件是哪张卷渲出来的——点进去直接展开那张卷的逐题明细
+              // （卷库页的选中态挂在 ?paper=，别写成 ?id= 会打不开）
+              <Link to={`/papers?paper=${encodeURIComponent(row.paper_id)}`}>{row.paper_id}</Link>
+            ) : (
+              <Typography.Text type="secondary">未记（不是每件都从卷渲出来）</Typography.Text>
+            ),
+          },
+          {
+            key: 'sha',
+            label: '内容指纹',
+            children: row.sha256 ? (
+              <Tooltip title={row.sha256}>
+                {/* 只摆前 12 位：够认「换没换过内容」，全串 64 位摆出来没人读 */}
+                <Typography.Text code style={{ fontSize: 12 }}>
+                  {row.sha256.slice(0, 12)}
+                </Typography.Text>
+              </Tooltip>
+            ) : (
+              <Typography.Text type="secondary">—</Typography.Text>
+            ),
+          },
+        ]}
+      />
 
       {v === 'pdf' ? (
         <iframe src={url} style={{ width: '100%', height: '72vh', border: 0 }} title={row.basename} />

@@ -475,6 +475,36 @@ CREATE TABLE IF NOT EXISTS artifact_member (
   PRIMARY KEY (parent_id, member_id)
 );
 
+-- ---------------------------------------------------------------------
+-- artifact_file —— 成品件实体行（2026-08-22 窗V 用户令「关联关系补上去」）
+-- 🔴 补的是什么：此前成品件只是 artifact.files_json 里的**一串路径字符串**——
+--    册↔文件靠约定不靠外键，「给我这册的答案卷」这种按角色取根本查不了（只能猜文件名）。
+--    本表把每个成品件升级成**实体行**：外键绑册、role 说明它是什么、hash/size 可验、
+--    paper_id 记血缘（这份 PDF 是哪张卷渲出来的）。
+-- 🔴 与 files_json 的关系（不废旧口径，两者同源）：files_json 保留为**兼容视图**
+--    （老消费方与展示台旧路径照用），本表是**权威明细**；写通路（artifact_tool）
+--    一次写两处，守恒闸对账（件数与路径集合必须相等，不许漂移）。
+-- 🔴 路径口径同 files_json：一律 `成品库/<artifact_id>·<人话名>/…` 相对路径（窗U 归一令）。
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS artifact_file (
+  id          TEXT PRIMARY KEY,               -- F+yyyymmdd+hex6
+  artifact_id TEXT NOT NULL REFERENCES artifact(id),
+  rel_path    TEXT NOT NULL,                  -- 相对 v2 根，成品库/ 开头
+  role        TEXT NOT NULL CHECK(role IN
+                ('题目卷','答案卷','分析图','分析报告','页图','封面','样张','其他')),
+  ord         INTEGER,                        -- 册内序（页图/多天册按此排）
+  ext         TEXT,                           -- pdf/png/md…（小写，无点）
+  bytes       INTEGER,
+  sha256      TEXT,                           -- 内容寻址：查重与"这份 PDF 换没换"全靠它
+  paper_id    TEXT REFERENCES paper(id),      -- 血缘：这件是哪张卷出的（无卷可空，如封面）
+  note        TEXT,
+  created_at  TEXT,
+  UNIQUE (artifact_id, rel_path)              -- 同册同路径只许一行（幂等重挂靠它）
+);
+CREATE INDEX IF NOT EXISTS ix_afile_artifact ON artifact_file(artifact_id);
+CREATE INDEX IF NOT EXISTS ix_afile_role     ON artifact_file(role);
+CREATE INDEX IF NOT EXISTS ix_afile_sha      ON artifact_file(sha256);
+
 CREATE TABLE IF NOT EXISTS punch_map (
   kind      TEXT NOT NULL CHECK(kind IN ('doc','material','question','asset')),
   punch_id  TEXT NOT NULL,
@@ -486,6 +516,11 @@ CREATE TABLE IF NOT EXISTS punch_map (
 
 -- artifact 补售卖态人工列（apply_ddl_263.py 幂等执行）：
 -- ALTER TABLE artifact ADD COLUMN sale_state TEXT CHECK(sale_state IN ('在售','待整理','停售'));
+
+-- exam_model 补册外键（2026-08-22 窗V，apply_ddl_窗V成品件.py 幂等执行）：
+-- 此前「这个分析模型是哪本册的」只写在 dsl_ref 命令行字符串与 params_json 里，靠字符串匹配
+-- 才能追溯；卷面考频分析类模型现在直接绑册。造题型模型（DSL 那六行）本就不属某册，留空。
+-- ALTER TABLE exam_model ADD COLUMN artifact_id TEXT REFERENCES artifact(id);
 
 -- ---------------------------------------------------------------------
 -- 🔴🔴 question_pattern 【已停用】（2026-08-19 对齐-003 用户裁决，正本=记录/口径对齐记录.md）

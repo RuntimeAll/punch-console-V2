@@ -26,9 +26,10 @@ cd console; pnpm exec vite --port 4300 --strictPort --host 127.0.0.1
   不联网不打 CDN；md 进 DOM 前一律过 `src/kb/mathjax.ts` 的 `mdToHtml`（先转义后放定界符）。
 - 真库页的类型与组件都在 `src/kb/`，**不碰 `src/mock/types.ts`**（那是 mock 页的公共契约件）。
 
-端点共 **18 条 = 17 读 + 1 写**（原 7 读 → PRD-003 +2 读 +1 写 → PRD-007 线2 +6 读 → PRD-007 二轮 +2 读）：
+端点共 **20 条 = 19 读 + 1 写**（原 7 读 → PRD-003 +2 读 +1 写 → PRD-007 线2 +6 读 →
+PRD-007 二轮 +2 读 → 成品速览 +2 读）：
 
-- 读（17）：`/api/kb/stats`、`/kg/tree`、`/questions`、`/questions/:id`、`/artifacts`、
+- 读（19）：`/api/kb/stats`、`/kg/tree`、`/questions`、`/questions/:id`、`/artifacts`、
   `/artifacts/:id`、`/artifact-members`（合刊关系）、`/materials`（物料清单）、`/papers/:id`、
   PRD-007 线2 的六个：`/kg/aliases`（别名层 + 一词多挂/断链告警）、`/kp/:id`（考点节点详情=聚合落点）、
   `/models`（三张脸：exam_model / solution_model / question_pattern**已停用**）、
@@ -36,8 +37,18 @@ cd console; pnpm exec vite --port 4300 --strictPort --host 127.0.0.1
   `/semantic/health`（语意 serve :4315 探活，唯一不碰库的读口）；
   PRD-007 二轮的两个：`/papers`（卷库列表：卷名/题数/满分/时长/所属册）、
   `/kg/patterns`（讲义 173 题型的下落：103 已锚进 kp.desc / 70 待人工归位，对齐-003；
-  🔴 唯一一条**读磁盘正本文件**的读口，路径可用 `KG_PATTERN_MAP`/`KG_PATTERN_LIST` 顶掉以便测回退）。
-- 写（1）：`POST /api/kb/sale-state` —— 🔴 **PRD-007 两轮一个写口都没加**，页面只读的原则不破。
+  🔴 唯一一条**读磁盘正本文件**的读口，路径可用 `KG_PATTERN_MAP`/`KG_PATTERN_LIST` 顶掉以便测回退）；
+  成品速览的两个：`/deliverables`（`artifact.files_json` 拉平成一件一行：文件名/类型/所属册/交付时间，
+  参数 `ext`（可逗号多值）/`kind`/`q`/`page`/`size`）、`/file?path=`（🔴 **全站唯一非 JSON 出口**，
+  把成品件原样 inline 吐给浏览器内嵌预览）。
+- 写（1）：`POST /api/kb/sale-state` —— 🔴 **PRD-007 两轮 + 成品速览一个写口都没加**，页面只读的原则不破。
+
+🔴 `/api/kb/file` 的五道闸（改这段代码前先读全）：路径必须以 `成品库/` 开头（成品库归一后
+`files_json` 全指这里）、无 `..` 段、非绝对路径、`resolve` 后仍在 `<v2根>/成品库/` 之内、
+扩展名在 `pdf/png/jpg/jpeg/md` 白名单里。**不许为了"先能看"把前缀放宽到 `产物/` 或仓根**——
+放宽一层就等于把整个仓（`password/` 就在隔壁）挂上 HTTP。归一没做完时库里还指着 `产物/…` 的行，
+`/deliverables` 会照实回 `previewable:false`（顶层 `outside_root_total` 给总数），页面显示
+「指针待归一」而不是给个点了 403 的死链接。
 
 二轮另给三个存量端点加了字段（都不新增写口）：`/artifacts` 加 `细类` + 人话名三件套
 （`display_name`/`display_from`/`code_name`）+ `retired`；`/templates` 加 `层` + `refs` 引用链；

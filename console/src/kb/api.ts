@@ -7,6 +7,7 @@ import type {
   KbArtifactDetail,
   KbArtifactList,
   KbCriteria,
+  KbDeliverables,
   KbKgPatterns,
   KbKpDetail,
   KbModels,
@@ -116,7 +117,32 @@ export const kbApi = {
   paper: (id: string) => get<KbPaperDetail>(`/papers/${encodeURIComponent(id)}`),
   /** 讲义 173 题型的下落（对齐-003）：103 已锚进 kp.desc / 70 待人工归位 */
   kgPatterns: () => get<KbKgPatterns>('/kg/patterns'),
+  /** 成品速览：artifact.files_json 拉平成「一件一行」。ext 多值（图=png+jpg+jpeg）逗号传 */
+  deliverables: (q: { ext?: string[]; kind?: string; q?: string; page?: number; size?: number } = {}) => {
+    const p = new URLSearchParams()
+    if (q.ext?.length) p.set('ext', q.ext.join(','))
+    if (q.kind) p.set('kind', q.kind)
+    if (q.q) p.set('q', q.q)
+    p.set('page', String(q.page ?? 1))
+    p.set('size', String(q.size ?? 50))
+    return get<KbDeliverables>(`/deliverables?${p.toString()}`)
+  },
 }
+
+/**
+ * 成品件原文件的直读地址（PDF 内嵌 / 图放大 / md 取文本都用它）。
+ * 🔴 它**不是** `get<T>()` 那条 JSON 通路——服务端直吐字节（全站唯一非 JSON 出口）。
+ *   路径越出 `成品库/` 或扩展名不在白名单，服务端一律 403（前端不许自己"修"路径去绕）。
+ */
+export const kbFileUrl = (path: string) => `${BASE}/file?path=${encodeURIComponent(path)}`
+
+/** 成品「类型」筛子：库里只有 pdf/png/jpg/jpeg/md 五种扩展名，图三种合并成一档 */
+export const DELIVERABLE_KINDS = [
+  { value: '', label: '全部', exts: [] as string[] },
+  { value: 'pdf', label: 'PDF', exts: ['pdf'] },
+  { value: 'img', label: '图', exts: ['png', 'jpg', 'jpeg'] },
+  { value: 'md', label: '文档', exts: ['md'] },
+] as const
 
 /** 册细类的中文说明（页签下的一句话，值域正本 = artifact.细类 的 CHECK） */
 export const ARTIFACT_SUBKINDS = [

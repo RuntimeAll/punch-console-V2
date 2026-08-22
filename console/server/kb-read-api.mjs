@@ -27,7 +27,14 @@
  *   并给 /api/kb/questions 加来源三维筛选、审核工单标记与 --like 语意搜索；
  *   PRD-007 **二轮页面线 +2 读**（GET /api/kb/papers 卷库列表、GET /api/kb/kg/patterns 题型下落），
  *   并给 /api/kb/artifacts 加「细类 + 人话名」、/api/kb/templates 加「层 + 引用链」。
- *   🔴 **写端点数仍是 1**：PRD-007 两轮一个写口都不加（页面只读、写归 agent 的原则不破）。
+ *   **成品速览 +2 读**（GET /api/kb/deliverables 成品件清单、GET /api/kb/file 成品件原文件）。
+ *   🔴 **写端点数仍是 1**：PRD-007 两轮 + 成品速览一个写口都不加（页面只读、写归 agent 的原则不破）。
+ *
+ * 🔴 端点可以是**裸文件**出口（`raw:true`）：/api/kb/file 直吐 PDF/PNG/md 字节流，是本文件
+ *   唯一一条不走 send() JSON 的口。它**不开库**（dispatcher 里在 openRo 之前就分流），
+ *   并被四道安全闸夹住：路径必须落在 `成品库/` 下、无 `..` 段、非绝对路径、扩展名白名单。
+ *   🔴 白名单前缀只认 `成品库/`（成品库归一后 files_json 全指这里）——**不许放宽到 产物/**：
+ *   放宽一层就等于把整个仓（含 password/）挂上 HTTP。
  *
  * 🔴 端点可以是**异步**的（返回 Promise）：语意搜索要等 :4315 的 serve 回话。
  *   异步那条路的只读句柄由 then 链关（见文件末尾 dispatcher），不许走 finally 提前关。
@@ -42,8 +49,8 @@
  */
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { basename, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // node:sqlite 仍带 ExperimentalWarning，起服务时刷屏没意义（能力本身已实测可用）
@@ -2068,6 +2075,240 @@ function epPaperDetail(db, id) {
   }
 }
 
+// ── 成品速览（deliverables + file）────────────────────────────────────────
+
+/**
+ * 🔴 成品件的**唯一**可读根目录。成品库归一（顶层 `成品库/<册id·人话名>/<文件>`）之后，
+ *   artifact.files_json 全部指向这里；本 API 的文件出口只认这一个前缀。
+ *   放宽前缀 = 把整个仓（`password/` 就在隔壁）挂上 HTTP，绝不许为「先能看」临时改宽。
+ */
+const DELIVER_ROOT = '成品库'
+
+/** 允许直吐的扩展名 → Content-Type（白名单制：不在表里的一律 403，不猜 MIME） */
+const FILE_MIME = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  md: 'text/markdown; charset=utf-8',
+}
+
+/** 前端「类型」筛子的值域（png/jpg/jpeg 在页面上合并成「图」，由前端传逗号多值） */
+const FILE_EXTS = new Set(Object.keys(FILE_MIME))
+
+const extOf = (p) => {
+  const i = String(p).lastIndexOf('.')
+  return i < 0 ? '' : String(p).slice(i + 1).toLowerCase()
+}
+
+/**
+ * 成品件清单：artifact.files_json 拉平成「一件一行」。
+ *
+ * 🔴 归一未完成期间库里的指针可能还是 `产物/…`。这一行**照实回** `previewable:false`
+ *   （顶层再给一个 outside_root_total），页面据此显示「指针未归一，预览待归一后可用」——
+ *   绝不静默把它渲成能点的链接，让人点出一个 403 去猜是不是权限坏了。
+ */
+function epDeliverables(db, q) {
+  const has细类 = hasCol(db, 'artifact', '细类')
+  const arts = all(
+    db,
+    `SELECT a.id, a.name, a.kind, a.status, a.source_line, a.delivered_at, a.note, a.link,
+            a.created_at, a.files_json, ${has细类 ? 'a.细类' : 'NULL'} AS 细类
+     FROM artifact a
+     WHERE a.files_json IS NOT NULL AND TRIM(a.files_json) NOT IN ('', '[]', 'null')`,
+  )
+
+  const rows = []
+  const badJson = [] // 🔴 坏 JSON 如实报，不静默当"这册没成品件"
+  const rootPrefix = `${DELIVER_ROOT}/`
+  for (const a of arts) {
+    let parsed
+    try {
+      parsed = JSON.parse(a.files_json)
+    } catch (e) {
+      badJson.push({ artifact_id: a.id, name: a.name, error: String(e.message) })
+      continue
+    }
+    // 正本形状=字符串数组；老数据万一是 {key: path} 的对象，取值不取键（键是序号不是路径）
+    const items = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === 'object'
+        ? Object.values(parsed)
+        : []
+    const hn = humanName(db, a, a.细类)
+    items.forEach((raw, i) => {
+      const file = String(raw ?? '').trim()
+      if (!file) return
+      const norm = file.replace(/\\/g, '/')
+      rows.push({
+        file,
+        // 文件名（basename）单摆一列：路径太长，人认的是文件名
+        basename: norm.slice(norm.lastIndexOf('/') + 1),
+        dir: norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/')) : '',
+        ext: extOf(norm),
+        ord: i, // 册内文件序（排序次键，保持 files_json 里的原序）
+        artifact_id: a.id,
+        artifact_name: hn.display_name,
+        artifact_code_name: hn.code_name,
+        artifact_display_from: hn.display_from,
+        kind: a.kind,
+        细类: a.细类 ?? null,
+        status: a.status,
+        source_line: a.source_line ?? null,
+        delivered_at: a.delivered_at ?? null,
+        note: a.note ?? null,
+        // 🔴 指针是否已归一到 成品库/：false = 文件口会 403，页面必须明说而不是给个死链接
+        previewable: norm.startsWith(rootPrefix) && FILE_EXTS.has(extOf(norm)),
+        in_root: norm.startsWith(rootPrefix),
+      })
+    })
+  }
+
+  // 分组计数一律**全量算**（不受当前筛选影响）：筛选器的选项表必须稳定，
+  // 否则选了 pdf 之后「图」的计数变 0，看着像库里没有图了
+  const countBy = (key) => {
+    const m = new Map()
+    for (const r of rows) m.set(r[key] ?? '（未标）', (m.get(r[key] ?? '（未标）') ?? 0) + 1)
+    return [...m.entries()].sort((x, y) => y[1] - x[1]).map(([value, count]) => ({ value, count }))
+  }
+  const extStat = countBy('ext')
+  const kindStat = countBy('kind')
+
+  // ── 筛选 ──────────────────────────────────────────────────────────────
+  // ext 支持重复给 + 逗号多值（页面「图」= png,jpg,jpeg 一次传三个）
+  const extWanted = (q?.getAll('ext') ?? [])
+    .flatMap((v) => String(v).split(','))
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean)
+  // 🔴 值域外的扩展名不当"不过滤"（与 /materials 的 account/sale_state 同口径）
+  const badExt = extWanted.filter((v) => !FILE_EXTS.has(v))
+  const kind = (q?.get('kind') ?? '').trim()
+  const kw = (q?.get('q') ?? '').trim().toLowerCase()
+
+  let filtered = rows
+  if (extWanted.length) {
+    filtered = badExt.length ? [] : filtered.filter((r) => extWanted.includes(r.ext))
+  }
+  if (kind) filtered = filtered.filter((r) => r.kind === kind)
+  if (kw) {
+    // 🔴 这里是 JS 侧 includes，不进 SQL LIKE ⇒ 不存在通配符问题（也就不需要 likeEsc）；
+    //   搜的是「文件名 + 完整路径 + 册名（人话名与内部代号都算）」
+    filtered = filtered.filter((r) =>
+      [r.basename, r.file, r.artifact_name, r.artifact_code_name ?? '']
+        .some((s) => String(s).toLowerCase().includes(kw)),
+    )
+  }
+
+  // 排序：交付时间倒序（没记交付时间的排最后，不拿建账时间冒充），次序 册id + 册内文件序
+  filtered = filtered.slice().sort((x, y) => {
+    const dx = x.delivered_at ?? ''
+    const dy = y.delivered_at ?? ''
+    if (dx !== dy) return dx && dy ? (dx < dy ? 1 : -1) : dx ? -1 : 1
+    if (x.artifact_id !== y.artifact_id) return x.artifact_id < y.artifact_id ? -1 : 1
+    return x.ord - y.ord
+  })
+
+  const page = Math.max(1, Number(q?.get('page') || 1))
+  const size = Math.min(200, Math.max(1, Number(q?.get('size') || 50)))
+  const off = (page - 1) * size
+
+  return {
+    total: filtered.length,
+    page,
+    size,
+    file_total: rows.length, // 全库成品件数（不受筛选影响）
+    artifact_total: arts.length, // 挂着成品件的册数
+    root: DELIVER_ROOT,
+    // 🔴 归一进度照实摆：还有多少件的指针没迁进 成品库/（它们预览会 403）
+    outside_root_total: rows.filter((r) => !r.in_root).length,
+    filters: {
+      ext: extWanted,
+      ext_invalid: badExt, // 值域外的扩展名：如实回并给 0 行，不当"没筛"
+      kind: kind || null,
+      q: kw || null,
+    },
+    ext_stat: extStat,
+    kind_stat: kindStat,
+    bad_json: badJson,
+    rows: filtered.slice(off, off + size),
+  }
+}
+
+/**
+ * 成品件路径闸 —— 把 `?path=` 收窄到「仓内 成品库/ 下的白名单扩展名文件」。
+ * 五道闸缺一不可，每一道都对应一种真实的越权写法：
+ *   ① 非法编码 / NUL 截断；② 绝对路径（`D:\…`、`/etc/…`）；③ `..` 上跳段；
+ *   ④ resolve 之后必须仍在 `<v2根>/成品库/` 之内（软链、编码变体都逃不过这一道）；
+ *   ⑤ 扩展名白名单（不在表里的一律拒，不猜 MIME）。
+ */
+function resolveDeliverable(rawPath) {
+  if (rawPath === null || rawPath === undefined || String(rawPath).trim() === '') {
+    return { ok: false, code: 400, error: '缺 path 参数（用法：/api/kb/file?path=成品库/…）' }
+  }
+  // 🔴 进来的值已被 URLSearchParams 解过一次码。这里**再解一次**是为了防二重编码
+  //   （`%252e%252e` → `%2e%2e` → `..`）；解不动就退回原值——文件名里真带一个 `%` 时
+  //   decodeURIComponent 会抛 URIError，"解码失败即拒收"会把好文件挡在门外。
+  //   🔴 解前解后两种形态都要过下面那道 `..` 闸，谁也绕不过去。
+  const once = String(rawPath)
+  let p
+  try {
+    p = decodeURIComponent(once)
+  } catch {
+    p = once
+  }
+  if (p.includes('\u0000')) return { ok: false, code: 403, error: 'path 含非法字符' }
+  const norm = p.replace(/\\/g, '/').trim()
+  const normOnce = once.replace(/\\/g, '/').trim()
+  if (/^[A-Za-z]:/.test(norm) || norm.startsWith('/') || p.startsWith('\\')) {
+    return { ok: false, code: 403, error: '只收仓内相对路径，绝对路径一律拒' }
+  }
+  if ([norm, normOnce].some((s) => s.split('/').some((seg) => seg === '..'))) {
+    return { ok: false, code: 403, error: 'path 含 .. 上跳段' }
+  }
+  if (!norm.startsWith(`${DELIVER_ROOT}/`)) {
+    return { ok: false, code: 403, error: `只允许读 ${DELIVER_ROOT}/ 下的成品件（本条指向库外）` }
+  }
+  const ext = extOf(norm)
+  if (!FILE_MIME[ext]) {
+    return { ok: false, code: 403, error: `扩展名 .${ext || '(无)'} 不在白名单（只放 ${[...FILE_EXTS].join('/')}）` }
+  }
+  const abs = resolve(V2_ROOT, norm)
+  const rootAbs = resolve(V2_ROOT, DELIVER_ROOT) + sep
+  if (!abs.startsWith(rootAbs)) {
+    return { ok: false, code: 403, error: `解析后落到了 ${DELIVER_ROOT}/ 之外` }
+  }
+  if (!existsSync(abs)) return { ok: false, code: 404, error: '文件不在盘上（库里的指针指了个空）' }
+  let st
+  try {
+    st = statSync(abs)
+  } catch (e) {
+    return { ok: false, code: 404, error: `读不到这个路径：${e.message}` }
+  }
+  if (!st.isFile()) return { ok: false, code: 404, error: '这是个目录不是文件' }
+  return { ok: true, abs, ext, size: st.size, name: basename(abs) }
+}
+
+/** 🔴 全站唯一的非 JSON 出口：把成品件原样吐给浏览器内嵌预览（不落缓存、只 inline 不下载） */
+function sendFile(res, rawPath) {
+  const r = resolveDeliverable(rawPath)
+  if (!r.ok) return send(res, r.code, { error: r.error, path: rawPath ?? null })
+  let buf
+  try {
+    buf = readFileSync(r.abs)
+  } catch (e) {
+    return send(res, 500, { error: `文件读失败：${e.message}` })
+  }
+  res.writeHead(200, {
+    'Content-Type': FILE_MIME[r.ext],
+    'Content-Length': buf.length,
+    // 中文文件名必须走 filename*=UTF-8''，裸 filename= 会被当 latin-1 变乱码
+    'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(r.name)}`,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  })
+  res.end(buf)
+}
+
 // ── 路由 ────────────────────────────────────────────────────────────────
 const ROUTES = [
   { re: /^\/api\/kb\/stats$/, run: (db) => epStats(db) },
@@ -2090,6 +2331,10 @@ const ROUTES = [
   // 🔴 顺序敏感：静态段 /papers 必须排在 /papers/:id 之前，否则列表口会被当成 id="" 的详情
   { re: /^\/api\/kb\/papers$/, run: (db, _m, q) => epPapers(db, q) },
   { re: /^\/api\/kb\/papers\/(.+)$/, run: (db, m) => epPaperDetail(db, decodeURIComponent(m[1])) },
+  // ── 成品速览 ──
+  { re: /^\/api\/kb\/deliverables$/, run: (db, _m, q) => epDeliverables(db, q) },
+  // 🔴 raw:true = 本条不吐 JSON、也**不开库**（dispatcher 在 openRo 之前就分流到 sendFile）
+  { re: /^\/api\/kb\/file$/, raw: true },
 ]
 
 /**
@@ -2184,10 +2429,17 @@ const server = createServer((req, res) => {
           '（sale_state 可写「未标」查未标册；account 可重复给=OR）',
         'GET /api/kb/papers?kind=&status=&artifact_id=（卷库列表：卷名/题数/满分/时长/所属册）',
         'GET /api/kb/papers/:id（逐题预览：题号/题面/题型难度/考点/状态）',
+        'GET /api/kb/deliverables?ext=&kind=&q=&page=&size=' +
+          '（成品速览：artifact.files_json 拉平成一件一行；ext 可逗号多值 pdf,png,jpg,jpeg,md；' +
+          '指针没归一到 成品库/ 的行 previewable=false，如实标不装死链）',
+        `GET /api/kb/file?path=${DELIVER_ROOT}/…（🔴 唯一非 JSON 出口：成品件原文件 inline 预览；` +
+          `只放 ${DELIVER_ROOT}/ 下的 ${[...FILE_EXTS].join('/')}，越界 403、指针指空 404）`,
         '🔴 POST /api/kb/sale-state {id, sale_state}（全站唯一写端点，只写 artifact.sale_state 一列）',
       ],
     })
   }
+  // 🔴 裸文件出口在开库**之前**分流：它一个字节都不碰 kb.db（也就没有句柄要关）
+  if (hit.r.raw) return sendFile(res, url.searchParams.get('path'))
   let db
   const shut = () => {
     try {
@@ -2231,11 +2483,26 @@ if (!existsSync(DB_PATH)) {
 }
 // 🔴 起服务前的自检闸①：全站写端点必须恰好 1 条，且只能是 sale-state；读端点数必须与
 // 文件头「端点账」对得上。靠闸不靠注释——有人偷偷 push 第二条写口 / 加个口不改账，服务直接起不来。
-const EP_READ = 17 // 原 7 + PRD-003 的 2 + PRD-007 线2 的 6 + PRD-007 二轮页面线的 2（kg/patterns、papers 列表）
+const EP_READ = 19 // 原 7 + PRD-003 的 2 + PRD-007 线2 的 6 + PRD-007 二轮页面线的 2（kg/patterns、papers 列表）
+//                  + 成品速览的 2（deliverables 清单、file 裸文件出口）
 const EP_WRITE = 1 // 全站唯一写口 sale-state
 if (WRITE_ROUTES.length !== EP_WRITE || WRITE_ROUTES[0].path !== '/api/kb/sale-state') {
   console.error(`🔴 写端点白名单被改了（现有 ${WRITE_ROUTES.length} 条）：页面只读原则=全站唯一写端点 sale-state`)
   process.exit(3)
+}
+// 🔴 裸文件出口白名单：全站只许有一条 raw 路由，且必须是 /api/kb/file（它绕开 JSON send 与只读库句柄，
+//    多一条就等于多一个「直接从磁盘吐字节」的口子）。非 raw 路由必须都带 run，否则 dispatcher 会炸。
+{
+  const raws = ROUTES.filter((r) => r.raw)
+  if (raws.length !== 1 || raws[0].re.source !== /^\/api\/kb\/file$/.source) {
+    console.error(`🔴 裸文件出口被改了（现有 ${raws.length} 条）：全站只许 GET /api/kb/file 一条 raw 路由`)
+    process.exit(3)
+  }
+  const noRun = ROUTES.filter((r) => !r.raw && typeof r.run !== 'function')
+  if (noRun.length) {
+    console.error(`🔴 有 ${noRun.length} 条路由没写 run（非 raw 路由必须带 run）`)
+    process.exit(3)
+  }
 }
 if (ROUTES.length !== EP_READ) {
   console.error(

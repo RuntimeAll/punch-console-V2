@@ -1114,6 +1114,10 @@ def main(argv=None):
                          '（缺省 <v2根>/知识库/kb.db）')
     ap.add_argument('--asset-root', help='asset.rel_path 的解析根（缺省 = v2 根；沙盘/副本资产用）')
     ap.add_argument('--no-log', action='store_true', help='不落 skill_log（沙盘自测用）')
+    ap.add_argument('--answers-compact', action='store_true',
+                    help='紧凑答案卷：fill 槽不重印题面，只印题号+答案（2026-08-22 用户'
+                         '格式令「不要题干只要题号」）。导出口径，不动库不动 punchkit——'
+                         '走 renderers/math.py fill 的 text_ans 现成回落位')
     a = ap.parse_args(argv)
     t0 = time.time()
     digest = '%s ord=%s' % (Path(a.pack).name, a.sample_ord)
@@ -1131,6 +1135,20 @@ def main(argv=None):
         assets = AssetResolver(pack, db=a.db, root=a.asset_root)
         days, per, key, body_pt, wm = build_days(papers, assets)
         assets.close()
+
+        if a.answers_compact:
+            # fill 是唯一在答案卷重印题面的槽（带 text_ans 键）；置 truthy 空标记 ——
+            # math.py 的回落逻辑是 `text_ans if (ans and text_ans) else text`，
+            # 空串会回落到题面，所以给 '<span></span>'（渲染为空但 truthy）。
+            # days 结构 = [卷][节][item]（build_days：节=裸 item 列表，无 group 包装）
+            n_compact = 0
+            for day in days:
+                for grp in day:
+                    for it in grp:
+                        if isinstance(it, dict) and 'text_ans' in it:
+                            it['text_ans'] = '<span></span>'
+                            n_compact += 1
+            print('  ✂️ 紧凑答案卷：%d 题（fill）答案卷不重印题面' % n_compact)
 
         L = layouts.get(key)
         R = renderers.get(pack.get('subject') or 'math')

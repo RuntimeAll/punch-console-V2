@@ -471,7 +471,13 @@ export interface KbArtifactList {
 
 export interface KbArtifactDetail extends Omit<KbArtifactRow, 'paper_count' | 'item_count'> {
   细类_available: boolean
-  files: Record<string, string> | null
+  /**
+   * 成品件路径清单（`artifact.files_json` 原样）。
+   * 🔴 库里存的是**字符串数组**（实查 87 册 793 件全是 `list`），不是 `{名:路径}` 的对象——
+   *   原先这里写成 `Record<string,string>` 导致册详情页 `Object.entries` 渲成「0：路径」。
+   *   成品库归一后每条都是 `成品库/<册id·人话名>/<文件>` 的仓内相对路径。
+   */
+  files: string[] | null
   papers: {
     id: string
     kind: string
@@ -605,4 +611,51 @@ export interface KbKgPatterns {
     kp_missing: boolean
     题型: { key: string; 题型名: string }[]
   }[]
+}
+
+// ── /api/kb/deliverables（成品速览）──────────────────────────────────────
+/** 一件成品文件 = 一行（`artifact.files_json` 拉平；一册 N 件就出 N 行） */
+export interface KbDeliverableRow {
+  /** 仓内相对路径（归一后一律 `成品库/…`）——预览就是拿它去换 `/api/kb/file?path=` */
+  file: string
+  basename: string
+  dir: string
+  ext: string
+  /** 册内文件序（files_json 里的原序，排序次键） */
+  ord: number
+  artifact_id: string
+  /** 册的人话名（组卷册取卷面标题 / 发布包取 note.标题候选[0]，取不到退回 name） */
+  artifact_name: string
+  artifact_code_name: string | null
+  artifact_display_from: string
+  kind: string
+  细类: KbArtifactSubkind | null
+  status: string
+  source_line: string | null
+  delivered_at: string | null
+  note: string | null
+  /** 🔴 false = 这条指针还没归一进 成品库/（或扩展名不在白名单），文件口会 403：页面必须明说 */
+  previewable: boolean
+  in_root: boolean
+}
+
+export interface KbDeliverables {
+  total: number
+  page: number
+  size: number
+  /** 全库成品件数（不受筛选影响） */
+  file_total: number
+  /** 挂着成品件的册数 */
+  artifact_total: number
+  /** 白名单根目录名（现为「成品库」） */
+  root: string
+  /** 指针还没归一到 root 下的件数——>0 时页面顶部要挂告警 */
+  outside_root_total: number
+  filters: { ext: string[]; ext_invalid: string[]; kind: string | null; q: string | null }
+  /** 筛选器选项来源：全量分组计数（不随筛选变化，否则选了 pdf 之后「图」显示 0 会像库里没图） */
+  ext_stat: { value: string; count: number }[]
+  kind_stat: { value: string; count: number }[]
+  /** files_json 解析不了的册（如实报，不静默当"这册没成品件"） */
+  bad_json: { artifact_id: string; name: string; error: string }[]
+  rows: KbDeliverableRow[]
 }

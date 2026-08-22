@@ -22,6 +22,7 @@
 import argparse
 import json
 import re
+import shutil
 import sys
 import time
 import uuid
@@ -96,6 +97,38 @@ def check_rel_file(f):
     return str(p).replace('\\', '/')
 
 
+_BAD_NAME = re.compile(r'[\\/:*?"<>|\r\n]+')
+
+
+def store_files(files, aid, name):
+    """🔴 挂账即归库（窗U 用户归一令「所有成品只走一个文件夹」）：
+    指针不在 `成品库/` 下的成品件，拷入 `成品库/<aid>·<人话名>/` 后换新指针。
+    渲染链出件位置照旧自由（产物/ 是工艺区）——**挂账是唯一归库动作**；
+    末尾断言兜底：写库的指针必须全部以 成品库/ 开头，绝不放行库外成品。"""
+    dirname = f'{aid}·{_BAD_NAME.sub("·", (name or "").strip())[:60] or "未命名"}'
+    out, seen = [], {}
+    for f in files:
+        if f.startswith('成品库/'):
+            out.append(f)
+            continue
+        base = f.rsplit('/', 1)[-1]
+        if base in seen:
+            seen[base] += 1
+            stem, dot, ext = base.rpartition('.')
+            base = f'{stem}·{seen[base]}.{ext}' if dot else f'{base}·{seen[base]}'
+        else:
+            seen[base] = 1
+        new = f'成品库/{dirname}/{base}'
+        dst = ROOT / new
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / f, dst)
+        out.append(new)
+    assert all(x.startswith('成品库/') for x in out), '🔴 归库闸炸：仍有库外指针'
+    if out != files:
+        print(f'  📦 挂账即归库：{sum(1 for a, b in zip(files, out) if a != b)} 件拷入 成品库/{dirname}/')
+    return out
+
+
 def cmd_add(conn, args):
     files = [check_rel_file(f) for f in (args.file or [])]
     if not files:
@@ -105,6 +138,7 @@ def cmd_add(conn, args):
         if not conn.execute('SELECT 1 FROM template WHERE id=?', (args.template,)).fetchone():
             sys.exit(f'🔴 template {args.template} 未登记（先 template-add）')
     aid = args.id or 'A' + datetime.now().strftime('%Y%m%d') + uuid.uuid4().hex[:6]
+    files = store_files(files, aid, args.name)          # 🔴 挂账即归库（窗U）
     note = args.note
     if note:
         json.loads(note)                      # 验 JSON（宣发字段包）
@@ -135,6 +169,7 @@ def cmd_files(conn, args):
     files = [check_rel_file(f) for f in (args.file or [])]
     if not files:
         sys.exit('🔴 至少挂一个成品件（--file 相对路径）')
+    files = store_files(files, args.id, row[1])         # 🔴 挂账即归库（窗U）
     conn.execute('UPDATE artifact SET files_json=? WHERE id=?',
                  (json.dumps(files, ensure_ascii=False), args.id))
     conn.commit()
